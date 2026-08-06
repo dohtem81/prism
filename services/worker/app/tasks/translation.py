@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import hashlib
+import json
+import time
+from uuid import uuid4
+
+from openai import OpenAI
+import redis
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from services.worker.app.celery_app import celery_app
+from services.worker.app.infra.settings import settings
+from shared.db.models import Message, MessageTranslation, OutboxEvent, Room, RoomEvent, RoomMember, TranslationTelemetry
+
+engine = create_engine(settings.database_url, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, decode_responses=True)
+
+
+def _cache_key(content_original: str, source_lang: str, target_lang: str, mode: str) -> str:
+    payload = f"{content_original}|{source_lang}|{target_lang}|{mode}"
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"translation:cache:{digest}"
+
+
+def _estimate_cost_usd(input_tokens: int | None, output_tokens: int | None) -> float | None:
+    if input_tokens is None or output_tokens is None:
+        return None
+    # Placeholder estimate for initial telemetry wiring.
+    return round(((input_tokens * 0.20) + (output_tokens * 0.80)) / 1_000_000, 6)
+
+
+def _translate_with_openai(content_original: str, source_lang: str, target_lang: str) -> tuple[str, int | None, int | None]:
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    response = client.responses.create(
+        model=settings.openai_translation_model,
+        input=(
+            "Translate the message while preserving intent and tone. "
+            f"Translate from {source_lang} to {target_lang}. "
+            "Return only translated text with no explanations.\n\n"
+            f"Message: {content_original}"
+        ),
+    )
+
+    input_tokens = getattr(response.usage, "input_tokens", None) if response.usage else None
+    output_tokens = getattr(response.usage, "output_tokens", None) if response.usage else None
+    return response.output_text.strip(), input_tokens, output_tokens
+
+
+@celery_app.task(name="services.worker.app.tasks.translation.translate_message")
+def translate_message(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
+    with SessionLocal() as db:
+        message = db.scalar(select(Message).where(Message.id == message_id))
+        room = db.scalar(select(Room).where(Room.id == room_id))
+        if not message or not room:
+            return {"message_id": message_id, "status": "not_found"}
+
+        members = db.scalars(select(RoomMember).where(RoomMember.room_id == room_id)).all()
+        target_langs = sorted({m.preferred_lang for m in members if m.preferred_lang != source_lang})
+
+        if not target_langs:
+            message.status = "translated"
+            message.version += 1
+            db.commit()
+            return {"message_id": message_id, "status": "no_target_languages"}
+
+        translations_patch: dict[str, dict[str, str]] = {}
+        success_count = 0
+        failure_count = 0
+        started_at = datetime.now(timezone.utc)
+
+        for target_lang in target_langs:
+            existing = db.scalar(
+                select(MessageTranslation).where(
+                    MessageTranslation.message_id == message_id,
+                    MessageTranslation.target_lang == target_lang,
+                )
+            )
+            if existing:
+                continue
+
+            queue_delay_ms = int((started_at - message.created_at).total_seconds() * 1000)
+            provider_start = time.perf_counter()
+            translated_text: str | None = None
+            input_tokens: int | None = None
+            output_tokens: int | None = None
+            status = "success"
+
+            key = _cache_key(content_original, source_lang, target_lang, room.default_translation_mode)
+            cached = redis_client.get(key)
+
+            try:
+                if cached:
+                    translated_text = cached
+                    provider_latency_ms = 0
+                else:
+                    translated_text, input_tokens, output_tokens = _translate_with_openai(
+                        content_original=content_original,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                    )
+                    redis_client.setex(key, 3600, translated_text)
+                    provider_latency_ms = int((time.perf_counter() - provider_start) * 1000)
+            except Exception:
+                status = "failed"
+                provider_latency_ms = int((time.perf_counter() - provider_start) * 1000)
+
+            end_to_end_delay_ms = int((datetime.now(timezone.utc) - message.created_at).total_seconds() * 1000)
+            telemetry = TranslationTelemetry(
+                room_id=room_id,
+                message_id=message_id,
+                target_lang=target_lang,
+                provider="openai",
+                status=status,
+                attempt=1,
+                queue_delay_ms=queue_delay_ms,
+                provider_latency_ms=provider_latency_ms,
+                end_to_end_delay_ms=end_to_end_delay_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                estimated_cost_usd=_estimate_cost_usd(input_tokens, output_tokens),
+                occurred_at=datetime.now(timezone.utc),
+            )
+            db.add(telemetry)
+
+            if status == "success" and translated_text:
+                translation = MessageTranslation(
+                    message_id=message_id,
+                    target_lang=target_lang,
+                    content=translated_text,
+                    provider="openai",
+                    quality_mode=room.default_translation_mode,
+                    translated_at=datetime.now(timezone.utc),
+                )
+                db.add(translation)
+                translations_patch[target_lang] = {
+                    "content": translated_text,
+                    "provider": "openai",
+                    "quality_mode": room.default_translation_mode,
+                    "translated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                success_count += 1
+            else:
+                failure_count += 1
+
+        if success_count == len(target_langs):
+            message.status = "translated"
+        elif success_count > 0:
+            message.status = "partially_translated"
+        else:
+            message.status = "translation_unavailable"
+
+        message.version += 1
+
+        room_sequence = (db.scalar(select(func.max(RoomEvent.room_sequence)).where(RoomEvent.room_id == room_id)) or 0) + 1
+        event_payload = {
+            "type": "MessageUpdated",
+            "message_id": message.id,
+            "version": message.version,
+            "translations_patch": translations_patch,
+            "status": message.status,
+        }
+
+        room_event = RoomEvent(
+            room_id=room_id,
+            room_sequence=room_sequence,
+            event_id=f"evt_{uuid4().hex[:24]}",
+            event_type="MessageUpdated",
+            payload=event_payload,
+            occurred_at=datetime.now(timezone.utc),
+        )
+        outbox_event = OutboxEvent(
+            aggregate_type="message",
+            aggregate_id=message.id,
+            event_type="MessageUpdated",
+            payload=event_payload,
+            status="pending",
+            created_at=datetime.now(timezone.utc),
+        )
+
+        db.add(room_event)
+        db.add(outbox_event)
+        db.commit()
+
+        return {
+            "message_id": message_id,
+            "room_id": room_id,
+            "status": message.status,
+            "successful_translations": str(success_count),
+            "failed_translations": str(failure_count),
+            "translations_patch": json.dumps(translations_patch),
+        }
