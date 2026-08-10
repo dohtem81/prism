@@ -59,17 +59,26 @@ Notes:
 
 ## Milestone 3: Realtime Messaging (Original Only)
 
+Status:
+
+- IMPLEMENTED (verified 2026-08-09) as an initial in-process slice.
+
 Deliverables:
 
-- WebSocket gateway and room subscriptions.
-- SendMessage command path.
-- Durable message persistence.
-- MessageCreated fanout.
-- Redis pub-sub fanout integration for multi-instance readiness.
+- WebSocket gateway and room subscriptions. [implemented]
+- SendMessage command path. [implemented]
+- Durable message persistence. [implemented]
+- MessageCreated fanout. [implemented for connected room subscribers]
+- Redis pub-sub fanout integration for multi-instance readiness. [not yet implemented]
 
 Definition of done:
 
-- Users in same room receive original messages in real time.
+- Users in same room receive original messages in real time. [achieved for connected clients in the current single-instance runtime]
+
+Notes:
+
+- The current implementation provides room-scoped realtime delivery for connected clients.
+- Reconnect replay/history recovery and multi-instance fanout remain follow-on work for later phases.
 
 ## Milestone 4: Translation Pipeline
 
