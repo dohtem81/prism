@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -9,10 +10,21 @@ from sqlalchemy.orm import Session
 from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.infra.celery_client import celery_client
 from services.api.app.infra.db import get_db
+from services.api.app.realtime.websocket_gateway import manager
 from shared.db.models import Message, OutboxEvent, Room, RoomEvent, RoomMember
 from shared.schemas.message_events import SendMessage, SendMessageResponse
 
 router = APIRouter(prefix="/v1/messages", tags=["messages"])
+
+
+def _broadcast_message_event(room_id: str, payload: dict) -> None:
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(manager.broadcast(room_id, payload))
+        return
+
+    running_loop.create_task(manager.broadcast(room_id, payload))
 
 
 @router.post("", response_model=SendMessageResponse)
@@ -56,6 +68,7 @@ def send_message(
 
     message_created_payload = {
         "type": "MessageCreated",
+        "room_id": payload.room_id,
         "message": {
             "message_id": message.id,
             "version": message.version,
@@ -90,6 +103,8 @@ def send_message(
         db.add(message)
         db.add(room_event)
         db.add(outbox_event)
+        outbox_event.status = "processed"
+        outbox_event.processed_at = created_at
         db.commit()
         db.refresh(message)
     except IntegrityError:
@@ -117,6 +132,8 @@ def send_message(
             },
             queue="translation.requested.q",
         )
+
+    _broadcast_message_event(message.room_id, message_created_payload)
 
     return SendMessageResponse(
         message_id=message.id,

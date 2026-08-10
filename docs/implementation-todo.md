@@ -47,8 +47,8 @@ Milestone mapping:
 | P1-02 | Milestone 1 | Foundation | Validate migrations end-to-end in running environment | DONE | High | 2026-08-05 | Verified via Docker: alembic upgrade head against compose postgres. |
 | P1-03 | Milestone 2 | API | Replace temporary X-User-Id auth with JWT auth | DONE | High | 2026-08-09 | JWT-based auth is now implemented and covered by unit tests. |
 | P1-04 | Milestone 2 | API | Add room creation and membership endpoints | DONE | High | 2026-08-09 | Room creation and membership management endpoints are implemented. |
-| P1-05 | Milestone 3 | Messaging | Implement MessageCreated realtime fanout from outbox | TODO | High | 2026-08-05 | Outbox writes exist; publisher/fanout loop still needed. |
-| P1-06 | Milestone 3 | Messaging | Implement MessageUpdated realtime fanout from outbox | TODO | High | 2026-08-05 | Worker writes outbox event; publish pipeline pending. |
+| P1-05 | Milestone 3 | Messaging | Implement MessageCreated realtime fanout from outbox | DONE | High | 2026-08-09 | MessageCreated fanout is implemented for connected room subscribers through the realtime gateway. |
+| P1-06 | Milestone 3 | Messaging | Implement MessageUpdated realtime fanout from outbox | TODO | High | 2026-08-05 | MessageUpdated fanout remains pending; Phase 3 currently covers original-message delivery only. |
 | P1-07 | Milestone 4 | Worker | Add robust retry policy and DLQ handling strategy | TODO | Medium | 2026-08-05 | Configure Celery retry/backoff and failed-task observability. |
 | P1-08 | Milestone 4 | Worker | Improve translation provider abstraction (adapter interface) | TODO | Medium | 2026-08-05 | OpenAI call is inline; extract adapter for testability. |
 | P1-09 | Milestone 4 | Worker | Add fallback policy when translation unavailable | IN_PROGRESS | High | 2026-08-05 | translation_unavailable status already set; add retry/circuit logic. |
