@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from services.worker.app.tasks.translation import _cache_key, _estimate_cost_usd, translate_message
 
@@ -62,3 +62,48 @@ def test_translate_message_handles_no_target_languages(session_local_mock: Magic
     assert message.status == "translated"
     assert message.version == 2
     db.commit.assert_called_once()
+
+
+@patch("services.worker.app.tasks.translation.manager.broadcast", new_callable=AsyncMock)
+@patch("services.worker.app.tasks.translation.build_translation_provider")
+@patch("services.worker.app.tasks.translation.SessionLocal")
+def test_translate_message_uses_provider_and_broadcasts_update(
+    session_local_mock: MagicMock,
+    provider_factory_mock: MagicMock,
+    broadcast_mock: AsyncMock,
+) -> None:
+    provider = MagicMock()
+    provider.translate.return_value = ("Hallo", 12, 7)
+    provider_factory_mock.return_value = provider
+
+    message = MagicMock()
+    message.id = "msg_1"
+    message.created_at = datetime.now(timezone.utc)
+    message.status = "original_only"
+    message.version = 1
+    message.author_user_id = "user_1"
+    message.source_lang = "pl"
+    message.content_original = "Czesc"
+
+    room = MagicMock()
+    room.id = "room_1"
+    room.default_translation_mode = "balanced"
+
+    db = MagicMock()
+    db.scalar.side_effect = [message, room]
+
+    member = MagicMock()
+    member.preferred_lang = "de"
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = [member]
+    db.scalars.return_value = scalars_result
+
+    session_local_mock.return_value.__enter__.return_value = db
+    session_local_mock.return_value.__exit__.return_value = False
+
+    result = translate_message("msg_1", "room_1", "pl", "Czesc")
+
+    provider_factory_mock.assert_called_once()
+    provider.translate.assert_called_once_with("Czesc", "pl", "de")
+    assert result["status"] == "translated"
+    broadcast_mock.assert_awaited_once()
