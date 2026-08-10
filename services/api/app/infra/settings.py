@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     redis_host: str = "localhost"
     redis_port: int = 6379
+    jwt_secret: str = "dev-secret"
 
 
 settings = Settings()
