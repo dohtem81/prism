@@ -26,16 +26,36 @@ Verification evidence:
 
 ## Milestone 2: Room and Auth APIs
 
+Status:
+
+- IN_PROGRESS / PARTIALLY COMPLETE (verified 2026-08-09)
+
+Working convention:
+
+- All local development, verification, and test execution should use Docker first.
+- If a command is run outside Docker, it should be treated as a temporary fallback only.
+- The canonical compose entrypoint remains `docker compose -f deploy/compose/docker-compose.yml ...`.
+
 Deliverables:
 
-- JWT-based auth integration.
-- Create room and membership APIs.
-- Role model (admin/member).
-- Preferred language stored per member.
+- JWT-based auth integration. [implemented]
+- Create room and membership APIs. [implemented]
+- Role model (admin/member). [implemented]
+- Preferred language stored per member. [implemented at the user-profile level and persisted in room membership flow]
 
 Definition of done:
 
-- Authorized users can create rooms and manage membership.
+- Authorized users can create rooms and manage membership. [implemented in API and covered by unit tests]
+
+Verification evidence:
+
+- Docker-based unit suite completed successfully: `16 passed in 0.73s`.
+- The API layer now includes `/v1/users`, `/v1/rooms`, and `/v1/rooms/{room_id}/members` routes.
+
+Notes:
+
+- This milestone covers the auth-and-rooms foundation only.
+- Realtime messaging remains part of Milestone 3 and is not included in this milestone's current implementation.
 
 ## Milestone 3: Realtime Messaging (Original Only)
 
