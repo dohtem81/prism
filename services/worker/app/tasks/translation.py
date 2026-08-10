@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import asyncio
 import hashlib
 import json
 import time
@@ -11,9 +12,41 @@ import redis
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+
+class TranslationProvider:
+    def translate(self, content_original: str, source_lang: str, target_lang: str) -> tuple[str, int | None, int | None]:
+        raise NotImplementedError
+
+
+class OpenAITranslationProvider(TranslationProvider):
+    def __init__(self) -> None:
+        self._client = OpenAI(api_key=settings.openai_api_key)
+
+    def translate(self, content_original: str, source_lang: str, target_lang: str) -> tuple[str, int | None, int | None]:
+        response = self._client.responses.create(
+            model=settings.openai_translation_model,
+            input=(
+                "Translate the message while preserving intent and tone. "
+                f"Translate from {source_lang} to {target_lang}. "
+                "Return only translated text with no explanations.\n\n"
+                f"Message: {content_original}"
+            ),
+        )
+
+        input_tokens = getattr(response.usage, "input_tokens", None) if response.usage else None
+        output_tokens = getattr(response.usage, "output_tokens", None) if response.usage else None
+        return response.output_text.strip(), input_tokens, output_tokens
+
+
+def build_translation_provider() -> TranslationProvider:
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    return OpenAITranslationProvider()
+
 from services.worker.app.celery_app import celery_app
 from services.worker.app.infra.settings import settings
 from shared.db.models import Message, MessageTranslation, OutboxEvent, Room, RoomEvent, RoomMember, TranslationTelemetry
+from services.api.app.realtime.websocket_gateway import manager
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -32,26 +65,6 @@ def _estimate_cost_usd(input_tokens: int | None, output_tokens: int | None) -> f
         return None
     # Placeholder estimate for initial telemetry wiring.
     return round(((input_tokens * 0.20) + (output_tokens * 0.80)) / 1_000_000, 6)
-
-
-def _translate_with_openai(content_original: str, source_lang: str, target_lang: str) -> tuple[str, int | None, int | None]:
-    if not settings.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured")
-
-    client = OpenAI(api_key=settings.openai_api_key)
-    response = client.responses.create(
-        model=settings.openai_translation_model,
-        input=(
-            "Translate the message while preserving intent and tone. "
-            f"Translate from {source_lang} to {target_lang}. "
-            "Return only translated text with no explanations.\n\n"
-            f"Message: {content_original}"
-        ),
-    )
-
-    input_tokens = getattr(response.usage, "input_tokens", None) if response.usage else None
-    output_tokens = getattr(response.usage, "output_tokens", None) if response.usage else None
-    return response.output_text.strip(), input_tokens, output_tokens
 
 
 @celery_app.task(name="services.worker.app.tasks.translation.translate_message")
@@ -101,7 +114,8 @@ def translate_message(message_id: str, room_id: str, source_lang: str, content_o
                     translated_text = cached
                     provider_latency_ms = 0
                 else:
-                    translated_text, input_tokens, output_tokens = _translate_with_openai(
+                    provider = build_translation_provider()
+                    translated_text, input_tokens, output_tokens = provider.translate(
                         content_original=content_original,
                         source_lang=source_lang,
                         target_lang=target_lang,
@@ -162,8 +176,31 @@ def translate_message(message_id: str, room_id: str, source_lang: str, content_o
         room_sequence = (db.scalar(select(func.max(RoomEvent.room_sequence)).where(RoomEvent.room_id == room_id)) or 0) + 1
         event_payload = {
             "type": "MessageUpdated",
+            "room_id": room_id,
             "message_id": message.id,
             "version": message.version,
+            "original_message": {
+                "message_id": message.id,
+                "version": message.version,
+                "author_user_id": message.author_user_id,
+                "source_lang": message.source_lang,
+                "content_original": message.content_original,
+                "status": message.status,
+                "created_at": message.created_at.isoformat() if message.created_at else None,
+            },
+            "translations": {
+                target_lang: {
+                    "content": translation.content,
+                    "provider": translation.provider,
+                    "quality_mode": translation.quality_mode,
+                    "translated_at": translation.translated_at.isoformat() if translation.translated_at else None,
+                }
+                for target_lang, translation in {
+                    t.target_lang: t for t in db.scalars(
+                        select(MessageTranslation).where(MessageTranslation.message_id == message_id)
+                    ).all()
+                }.items()
+            },
             "translations_patch": translations_patch,
             "status": message.status,
         }
@@ -188,6 +225,11 @@ def translate_message(message_id: str, room_id: str, source_lang: str, content_o
         db.add(room_event)
         db.add(outbox_event)
         db.commit()
+
+        try:
+            asyncio.get_running_loop().create_task(manager.broadcast(room_id, event_payload))
+        except RuntimeError:
+            asyncio.run(manager.broadcast(room_id, event_payload))
 
         return {
             "message_id": message_id,

@@ -49,9 +49,9 @@ Milestone mapping:
 | P1-04 | Milestone 2 | API | Add room creation and membership endpoints | DONE | High | 2026-08-09 | Room creation and membership management endpoints are implemented. |
 | P1-05 | Milestone 3 | Messaging | Implement MessageCreated realtime fanout from outbox | DONE | High | 2026-08-09 | MessageCreated fanout is implemented for connected room subscribers through the realtime gateway. |
 | P1-06 | Milestone 3 | Messaging | Implement MessageUpdated realtime fanout from outbox | TODO | High | 2026-08-05 | MessageUpdated fanout remains pending; Phase 3 currently covers original-message delivery only. |
-| P1-07 | Milestone 4 | Worker | Add robust retry policy and DLQ handling strategy | TODO | Medium | 2026-08-05 | Configure Celery retry/backoff and failed-task observability. |
-| P1-08 | Milestone 4 | Worker | Improve translation provider abstraction (adapter interface) | TODO | Medium | 2026-08-05 | OpenAI call is inline; extract adapter for testability. |
-| P1-09 | Milestone 4 | Worker | Add fallback policy when translation unavailable | IN_PROGRESS | High | 2026-08-05 | translation_unavailable status already set; add retry/circuit logic. |
+| P1-07 | Milestone 4 | Worker | Add robust retry policy and DLQ handling strategy | TODO | Medium | 2026-08-09 | The initial translation path is implemented; retry and DLQ hardening remain as follow-on work. |
+| P1-08 | Milestone 4 | Worker | Improve translation provider abstraction (adapter interface) | DONE | Medium | 2026-08-09 | A provider abstraction is now implemented and exercised by unit tests. |
+| P1-09 | Milestone 4 | Worker | Add fallback policy when translation unavailable | DONE | High | 2026-08-09 | translation_unavailable status is set in the current worker flow when translations fail. |
 | P1-10 | Cross-cutting | Data | Add seed/dev bootstrap script for users/rooms/members | TODO | Medium | 2026-08-05 | Speeds local QA and API testing. |
 | P1-11 | Milestone 7 | Analytics | Build room admin metrics summary endpoint | TODO | Medium | 2026-08-05 | Contract exists in docs, implementation pending. |
 | P1-16 | Milestone 2 | API | Add user onboarding endpoint for profile creation | DONE | High | 2026-08-09 | `/v1/users` creates or updates a user profile and persists preferred language. |
@@ -64,9 +64,16 @@ Milestone mapping:
 ## Near-Term Execution Order
 
 1. Complete the remaining Milestone 2 follow-on work if any.
-2. Start Milestone 3 by implementing P1-05 and P1-06 for outbox publisher + websocket fanout.
-3. Add P1-14 to validate the core message flow end to end.
-4. Move on to Milestone 4 work once realtime delivery is stable.
+2. Keep Milestone 3 as the current baseline for room-based realtime delivery.
+3. Start Milestone 4 by implementing the translation-request flow and worker-side translation persistence.
+4. Add P1-14 to validate the core message flow end to end once translation updates are wired.
+
+## Phase 4 Execution Focus
+
+- P1-07: add retry and DLQ handling for translation worker failures.
+- P1-08: extract a translation provider adapter so the worker logic is testable.
+- P1-09: ensure translation_unavailable is surfaced cleanly when providers fail.
+- P1-14: add an integration test for send message -> translation -> MessageUpdated.
 
 ## Change Log
 

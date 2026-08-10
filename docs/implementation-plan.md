@@ -82,6 +82,10 @@ Notes:
 
 ## Milestone 4: Translation Pipeline
 
+Status:
+
+- IMPLEMENTED (verified 2026-08-09) as an initial backend translation-update slice.
+
 Deliverables:
 
 - TranslationRequested queue contract and RabbitMQ exchange/queue bindings.
@@ -89,9 +93,23 @@ Deliverables:
 - MessageUpdated patch events.
 - Room-level quality mode wiring.
 
+Implementation approach:
+
+1. Keep the existing message creation path as the entrypoint for original-message persistence.
+2. Introduce a dedicated translation-request flow that queues work for each target language derived from room membership preferences.
+3. Have the worker write translated content to the message_translations table, update message status, and emit a MessageUpdated event.
+4. Broadcast MessageUpdated events to connected room subscribers so clients receive follow-up translations without breaking the original timeline.
+5. Preserve idempotency by deduplicating per message/target-language work and handling provider failures with a translation_unavailable fallback.
+
 Definition of done:
 
-- Users receive follow-up translation updates for same message id.
+- Users receive follow-up translation updates for the same message id, and provider failures do not break the original room timeline. [implemented for the current backend path; retry/DLQ hardening remain follow-on work]
+
+Notes:
+
+- The current implementation persists translations, updates message status, and emits a MessageUpdated event that preserves the original message id and includes the original message plus translations.
+- The worker now uses a translation provider abstraction, and the unit test suite validates the translation-update path.
+- Queue/worker hardening and more explicit retry semantics remain future follow-up work.
 
 ## Milestone 5: History and Replay
 
