@@ -114,6 +114,10 @@ Notes:
 
 ## Milestone 5: History and Replay
 
+Status:
+
+- NOT STARTED (deferred)
+
 Deliverables:
 
 - History API with cursor pagination.
@@ -123,6 +127,11 @@ Deliverables:
 Definition of done:
 
 - Client can recover consistent timeline after disconnect.
+
+Notes:
+
+- This is intentionally deferred while the live room delivery and translation-update stages are stabilized.
+- The current browser flow is live-only and does not include past message loading.
 
 ## Milestone 6: Hardening and Observability
 

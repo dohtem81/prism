@@ -276,6 +276,46 @@
         }
       }
 
+      async function loadRoomMessages() {
+        if (!roomId) return;
+
+        try {
+          const storageKey = `prism:last-message:${roomId}`;
+          const lastMessageId = localStorage.getItem(storageKey);
+          const shouldUseCursor = state.messages.length > 0 && !!lastMessageId;
+          const url = new URL(`/v1/rooms/${roomId}/messages`, window.location.origin);
+          url.searchParams.set('user_id', activeUserId);
+          url.searchParams.set('limit', '50');
+          if (shouldUseCursor) {
+            url.searchParams.set('since_message_id', lastMessageId);
+          }
+
+          const response = await fetch(url.toString().replace(window.location.origin, ''), {
+            headers: { Authorization: `Bearer ${activeToken}` }
+          });
+          if (!response.ok) {
+            throw new Error('messages unavailable');
+          }
+
+          const messages = await response.json();
+          if (messages.length) {
+            const newest = messages[messages.length - 1];
+            localStorage.setItem(storageKey, newest.message_id);
+          }
+
+          if (shouldUseCursor) {
+            state.messages = [...state.messages.filter(item => !messages.some(msg => msg.message_id === item.message_id)), ...messages];
+          } else {
+            state.messages = [...messages];
+          }
+
+          state.messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+          renderMessages();
+        } catch (error) {
+          console.error('Failed to load room messages', error);
+        }
+      }
+
       function connectSocket() {
         if (!roomId) return;
         if (state.socket) {
@@ -286,9 +326,10 @@
         const socket = new WebSocket(socketUrl);
         state.socket = socket;
 
-        socket.onopen = () => {
+        socket.onopen = async () => {
           setConnectionState('Connected');
           roomStatus.textContent = 'Live';
+          await loadRoomMessages();
         };
 
         socket.onmessage = (event) => {
@@ -296,6 +337,7 @@
           if (payload.type === 'MessageCreated') {
             const message = payload.message;
             state.messages = [...state.messages.filter(item => item.message_id !== message.message_id), message];
+            localStorage.setItem(`prism:last-message:${roomId}`, message.message_id);
             renderMessages();
           }
 
