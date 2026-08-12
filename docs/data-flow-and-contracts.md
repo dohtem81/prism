@@ -1,24 +1,47 @@
 # Data Flow and Contracts
 
-## End-to-End Message Flow
+## Message Lifecycle
 
-1. Client calls the REST message endpoint to create a message in a room.
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant PG as PostgreSQL
+    participant MQ as RabbitMQ
+    participant W as Celery Worker
+    participant LLM as Translation Provider
+
+    C->>A: POST /v1/rooms/{id}/messages
+    A->>PG: persist message (status: original_only, version: 1)
+    A-->>C: 201 Created
+    A-)C: WebSocket — MessageCreated
+    A-)MQ: TranslationRequested job
+
+    MQ-)W: consume job
+    W->>LLM: translate to each target language
+    LLM-->>W: translated text
+    W->>PG: persist translations, bump version, update status
+    W-)A: trigger MessageUpdated broadcast
+    A-)C: WebSocket — MessageUpdated (translations_patch, new version)
+```
+
+**Degraded path (provider unavailable):**
+
+Steps 1–5 are unchanged — the message is delivered in the original language before translation starts. The worker retries according to the retry policy. On exhaustion or permanent failure, it marks the message `translation_unavailable` and emits a final `MessageUpdated` with that status. Chat is never blocked.
+
+---
+
+## End-to-End Message Flow (prose)
+
+1. Client calls the REST message endpoint.
 2. API validates auth and room membership.
-3. API persists the original message with version = 1 and status = original_only.
-4. API broadcasts a MessageCreated event to all connected room subscribers.
-5. API queues a translation job for the worker.
-6. Worker computes target languages and translates the content.
-7. Worker persists translations and updates the message version and status.
-8. Worker broadcasts a MessageUpdated event to the room.
-9. Clients patch or render the updated message in place by message_id.
-
-Failure path when the translation provider is unavailable:
-
-1. Steps 1 through 5 still execute unchanged.
-2. Worker retries according to policy.
-3. On exhaustion or provider failure, the worker marks the message as translation_unavailable or partially_translated when applicable.
-4. The original message remains in the room timeline and is not blocked by translation failure.
-5. Translation is treated as enrichment rather than the primary delivery guarantee.
+3. API persists the original message with `version = 1` and `status = original_only`.
+4. API broadcasts a `MessageCreated` event to all connected room subscribers.
+5. API queues a `TranslationRequested` job.
+6. Worker computes target languages from room member preferences and translates content.
+7. Worker persists translations and updates message version and status.
+8. Worker broadcasts a `MessageUpdated` event to the room.
+9. Clients patch the existing message in place by `message_id`.
 
 > **Note:** Multi-instance Redis pub/sub fan-out is not yet implemented. The current runtime uses a single API replica with in-process broadcast.
 

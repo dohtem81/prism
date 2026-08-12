@@ -12,28 +12,57 @@ When a message is sent, it is delivered immediately to all connected clients. Tr
 
 ---
 
-## How it works
+## Architecture
 
-```
-Browser / API Client
-        │
-        │  REST + WebSocket
-        ▼
-   FastAPI API  ──── PostgreSQL (messages, rooms, users)
-        │
-        │  publishes translation job
-        ▼
-    RabbitMQ
-        │
-        ▼
-  Celery Worker  ──── Translation Provider (OpenAI / OpenRouter)
-        │
-        │  writes translation, emits MessageUpdated event
-        ▼
-   FastAPI API  ──── WebSocket push to all room subscribers
+```mermaid
+flowchart LR
+  Client[Browser / API Client]
+  API[FastAPI API]
+  PG[(PostgreSQL)]
+  MQ[(RabbitMQ)]
+  Worker[Celery Worker]
+  LLM[Translation Provider]
+  Redis[(Redis)]
+
+  Client -->|REST + WebSocket| API
+  API --> PG
+  API --> MQ
+  MQ --> Worker
+  Worker --> LLM
+  Worker --> PG
+  Worker -->|MessageUpdated event| API
+  API -->|WebSocket push| Client
+  Redis -.-|cache| API
 ```
 
-The API and worker are decoupled — the worker only writes to Postgres and fires an update event back through the API gateway. Translation quality and the model used are config-driven and can be swapped without touching application logic.
+## Message flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant PG as PostgreSQL
+    participant MQ as RabbitMQ
+    participant W as Celery Worker
+    participant LLM as Translation Provider
+
+    C->>A: POST /v1/rooms/{id}/messages
+    A->>PG: persist message (status: original_only)
+    A-->>C: 201 Created
+    A-)C: WebSocket — MessageCreated
+    A-)MQ: TranslationRequested job
+
+    MQ-)W: consume job
+    W->>LLM: translate content
+    LLM-->>W: translated text
+    W->>PG: persist translations, update status
+    W-)A: trigger MessageUpdated broadcast
+    A-)C: WebSocket — MessageUpdated (with translations)
+```
+
+**When the translation provider is unavailable:** steps 1–5 still execute — the message is delivered in the original language. The worker retries, then marks the message `translation_unavailable` and pushes a status update. Chat is never blocked.
+
+The API and worker are fully decoupled. The worker only writes to Postgres and fires an update event back through the gateway. The translation model can be swapped via config without touching application logic.
 
 ---
 
@@ -143,11 +172,21 @@ pytest -q tests/unit
 - Reconnect-safe room history replay
 - Docker-first local dev with Postgres, RabbitMQ, Redis, API, and worker
 
-**Planned:**
-- Redis pub/sub fan-out across multiple API replicas
-- Admin analytics and room metrics dashboards
-- Structured observability and correlation IDs
-- Production hardening (payload validation, quotas, rate limiting)
+**Planned / not yet built:**
+- Redis pub/sub fan-out across multiple API replicas (currently single-instance only)
+- Admin analytics and room metrics dashboards (telemetry schema is in place, aggregation and API are not)
+- Structured observability — correlation IDs, request tracing across API and worker
+- Production hardening — payload size limits, rate limiting, quota enforcement
+- Seed / dev bootstrap script for quick local QA setup
 
+---
+
+## Use this as a starting point
+
+This project is a working foundation for anyone building a real-time multilingual chat system. The core architecture — async translation via a decoupled worker, live WebSocket updates, and graceful provider degradation — is implemented and tested.
+
+If you want to build on it, the natural next steps are listed above under *Planned*. Everything is Docker-first, the service boundaries are clean, and the worker's translation provider is fully abstracted behind a config-driven interface — so swapping models or providers requires no code changes.
+
+Pull requests and forks are welcome. If you extend it in an interesting direction, feel free to open an issue to share what you built.
 
 
