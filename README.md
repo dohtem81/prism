@@ -64,16 +64,20 @@ cp .env.example .env
 ```env
 TRANSLATION_PROVIDER=openai
 TRANSLATION_MODEL=gpt-4.1-mini
+TRANSLATION_FALLBACK_PROVIDER=openai
+TRANSLATION_FALLBACK_MODEL=gpt-4.1-mini
 OPENAI_API_KEY=your_key_here
 ```
 
-**3. Start everything**
+> If port 8000 is already in use, set `API_PORT` in `.env` to a free port (e.g. `8010`).
+
+**3. Start all services**
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up --build
 ```
 
-**4. Run database migrations** (separate shell)
+**4. Run database migrations** (in a separate shell)
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head
@@ -83,13 +87,35 @@ docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migr
 
 Navigate to `http://localhost:8000/ui` — create rooms, add users, send messages, and watch translations arrive live.
 
-**6. Verify the API is up**
+**6. Verify the API**
 
 ```bash
 curl http://localhost:8000/v1/health
 ```
 
-> If port 8000 is already in use, set `API_PORT` in `.env` to a free port.
+---
+
+## Docker command reference
+
+| What | Command |
+|---|---|
+| Start (foreground) | `docker compose -f deploy/compose/docker-compose.yml up --build` |
+| Start (detached) | `docker compose -f deploy/compose/docker-compose.yml up --build -d` |
+| Stop | `docker compose -f deploy/compose/docker-compose.yml down` |
+| Stop + wipe volumes | `docker compose -f deploy/compose/docker-compose.yml down -v` |
+| Run migrations | `docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head` |
+| Run tests | `docker compose -f deploy/compose/docker-compose.yml run --rm tests` |
+| API logs | `docker compose -f deploy/compose/docker-compose.yml logs -f api` |
+| Worker logs | `docker compose -f deploy/compose/docker-compose.yml logs -f worker` |
+
+**Creating a new migration after schema changes:**
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml run --rm api \
+  alembic -c migrations/alembic.ini revision --autogenerate -m "describe_change"
+docker compose -f deploy/compose/docker-compose.yml run --rm api \
+  alembic -c migrations/alembic.ini upgrade head
+```
 
 ---
 
@@ -123,17 +149,5 @@ pytest -q tests/unit
 - Structured observability and correlation IDs
 - Production hardening (payload validation, quotas, rate limiting)
 
----
 
-## Docker command reference
 
-| Alias | Command |
-|---|---|
-| `up` | `docker compose -f deploy/compose/docker-compose.yml up --build` |
-| `up (detached)` | `docker compose -f deploy/compose/docker-compose.yml up --build -d` |
-| `down` | `docker compose -f deploy/compose/docker-compose.yml down` |
-| `down + volumes` | `docker compose -f deploy/compose/docker-compose.yml down -v` |
-| `migrate` | `docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head` |
-| `test` | `docker compose -f deploy/compose/docker-compose.yml run --rm tests` |
-| `logs (api)` | `docker compose -f deploy/compose/docker-compose.yml logs -f api` |
-| `logs (worker)` | `docker compose -f deploy/compose/docker-compose.yml logs -f worker` |
