@@ -77,19 +77,16 @@ Key outputs:
 
 ## 6. History Service
 
-Status:
-
-- Planned, not implemented yet.
+> **Status: Implemented.** Room history endpoint returns recent messages with translations for reconnect-safe replay.
 
 Responsibilities:
 
-- return paginated room history
-- include original text and available translations
-- support replay after reconnect or browser refresh
+- Return recent room history with original text and available translations.
+- Support cursor-based replay after reconnect or browser refresh.
 
 Key outputs:
 
-- consistent timeline reconstruction for clients after the current live-room stage is complete
+- Consistent timeline reconstruction for clients that rejoin a room.
 
 ## 7. Persistence Layer
 
@@ -105,20 +102,16 @@ Key outputs:
 
 ## 8. Redis Layer
 
-Status:
-
-- Infrastructure present, but not fully used for the current runtime model.
+> **Status: Partially used.** Translation result cache is active. Presence, rate limiting, and multi-instance pub/sub fanout are pending.
 
 Responsibilities:
 
-- local cache support for transient metadata or translation lookups
-- future presence tracking and rate-limit support
-- future multi-instance pub/sub fanout and replay support
+- Translation result cache keyed by content hash, source language, and target language.
+- Future: presence tracking, rate-limit counters, and multi-instance WebSocket fan-out.
 
 Key outputs:
 
-- reduced local operational friction for the current single-instance setup
-- foundation for later scaling work without changing the current message contract
+- Reduced redundant provider calls for repeated content.
 
 ## 9. Observability Layer
 
@@ -134,27 +127,18 @@ Key outputs:
 
 ## 10. Room Analytics Service
 
-Status:
-
-- Planned, not implemented yet.
+> **Status: Pending.** Telemetry schema exists; aggregation jobs, API, and UI are follow-on work.
 
 Responsibilities:
 
-- ingest translation telemetry events from workers
-- compute room-scoped aggregates for cost and delay
-- expose admin-facing metrics APIs with time windows and breakdowns
-- cache recent dashboard responses for low-latency admin views
+- Ingest per-translation telemetry events from workers.
+- Compute room-scoped aggregates for cost, delay, and reliability.
+- Expose admin-facing metrics API with time-window and language-pair breakdowns.
+- Cache recent dashboard responses for low-latency reads.
 
-Key outputs:
+Planned metrics:
 
-- room admin dashboard data for spend, delay, reliability, and usage once this phase is implemented
-
-Tracked metrics:
-
-- total translation spend by room
-- cost per message and cost per translated character/token
-- queue wait time, provider latency, and end-to-end translation delay
-- success rate, failure rate, and retry rate
-- top language pairs by volume and cost
-
-The telemetry schema exists in the data model, but the analytics API and UI layers are still pending.
+- Total translation spend and cost per message by room
+- Queue wait time, provider latency, and end-to-end delay percentiles
+- Success, failure, and retry rates
+- Top language pairs by volume and cost

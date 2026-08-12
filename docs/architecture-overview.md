@@ -1,12 +1,12 @@
 # Architecture Overview
 
-## Objectives
+## Design Goals
 
-- Preserve chat responsiveness by delivering original messages immediately.
-- Perform translation on the server to reduce LLM usage and ensure consistent output per language.
-- Support room-based conversations with configurable translation strategy.
-- Persist complete message history, including translation updates.
-- Preserve core chat functionality during LLM/provider outages by continuing original-message delivery.
+- Deliver original messages immediately — translation never blocks chat responsiveness.
+- Perform translation server-side for consistent output and shared cost across recipients.
+- Support room-based conversations with per-room configurable translation quality.
+- Persist the complete message timeline including all translation updates.
+- Maintain chat functionality during provider outages through graceful degradation.
 
 ## High-Level Architecture
 
@@ -25,24 +25,18 @@ flowchart LR
 
 ## Runtime Topology
 
-- API container: FastAPI REST + WebSocket gateway + dashboard UI.
-- Worker container: Celery consumer for translation jobs.
-- Database container: PostgreSQL for durable state, room membership, messages, and translations.
-- Queue container: RabbitMQ for durable translation jobs.
-- Redis container: currently used for local cache and operational support; multi-instance pub/sub fanout is not yet implemented.
+| Container | Role |
+|---|---|
+| `api` | FastAPI REST endpoints, WebSocket gateway, browser dashboard |
+| `worker` | Celery consumer for translation jobs |
+| `postgres` | Durable store for rooms, members, messages, translations, and events |
+| `rabbitmq` | Translation job queue with dead-letter support |
+| `redis` | Translation result cache; pub/sub fanout for multi-instance is not yet implemented |
 
 ## State Ownership
 
-- PostgreSQL is the source of truth for rooms, membership, messages, translations, and room events.
-- Redis is currently used as an auxiliary cache and operational layer rather than the canonical store.
-- Redis is not yet acting as the primary authorization or history source.
-
-## Redis Responsibilities
-
-- cache for transient translation or metadata lookups
-- local operational support for future presence and rate-limit use cases
-- room and request-level normalization helpers for the current single-instance runtime
-- future expansion for multi-instance pub/sub and replay support
+- **PostgreSQL** is the canonical source of truth for all rooms, memberships, messages, translations, and events.
+- **Redis** is an auxiliary cache for translation results and short-lived operational keys. It is not the authoritative store for any domain entity.
 
 ## Core Architectural Pattern
 
@@ -67,10 +61,10 @@ The current slice includes reconnect-safe room history for recent messages, whil
 
 ## Delivery Semantics
 
-- Realtime stream: live room fanout to connected clients.
-- Message identity: stable message id across original and translated updates.
-- Versioning: monotonic message version increment on each server-side update.
-- History replay: not yet implemented in the current stage.
+- **Realtime stream:** live room fan-out to all currently connected clients.
+- **Message identity:** stable `message_id` across the original broadcast and all subsequent translation updates.
+- **Versioning:** monotonically incrementing `version` on every server-side message update.
+- **History replay:** room history endpoint returns recent messages for reconnect-safe replay.
 
 ## Room Configuration Model
 
@@ -84,12 +78,12 @@ Mode influences prompt profile, model choice, timeout, retry policy, and batchin
 
 ## Room Admin Metrics Model
 
-This is planned but not yet implemented in the active codebase:
+> **Status: Pending.** The telemetry schema is in place; the aggregation jobs, API, and dashboard are follow-on work.
 
-- translation cost by room and time window
-- end-to-end translation delay percentiles
-- queue delay and worker processing time
-- translation success/failure rate
-- per-language volume and cost breakdown
+Planned tracked metrics:
 
-The raw telemetry tables exist in the database model, but the admin metrics APIs and dashboards are still follow-on work.
+- Translation cost by room and time window
+- End-to-end translation delay percentiles
+- Queue delay and worker processing time
+- Translation success, failure, and retry rates
+- Per-language-pair volume and cost breakdown
