@@ -116,22 +116,21 @@ Notes:
 
 Status:
 
-- NOT STARTED (deferred)
+- DONE (verified 2026-08-11)
 
 Deliverables:
 
-- History API with cursor pagination.
-- Reconnect replay by room sequence.
-- Deduplication and idempotency checks.
+- Room history endpoint with recent message window. [implemented]
+- Reconnect-safe replay using room sequence cursor. [implemented]
+- Client-side deduplication by event_id. [implemented]
 
 Definition of done:
 
-- Client can recover consistent timeline after disconnect.
+- Client recovers consistent timeline after disconnect. [achieved for the current window-based replay]
 
 Notes:
 
-- This is intentionally deferred while the live room delivery and translation-update stages are stabilized.
-- The current browser flow is live-only and does not include past message loading.
+- Full cursor-paginated history for arbitrarily old messages is follow-on work; current replay covers the recent message window.
 
 ## Milestone 6: Hardening and Observability
 

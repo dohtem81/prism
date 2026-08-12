@@ -29,21 +29,25 @@ Use these command aliases as the standard Docker-first workflow.
 
 ## Quick Start
 
-If port 8000 is already in use, set API_PORT in .env to a free host port (example: 8010).
+Important: local secrets and environment values must stay out of Git. The repository tracks only `.env.example`, and a real `.env` file is created locally from that template and never committed.
 
-1. Copy env file:
+If port 8000 is already in use, set API_PORT in `.env` to a free host port (example: 8010).
+
+1. Copy the example env file locally:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Start infrastructure and services:
+2. Fill in any required secrets, such as OpenRouter or OpenAI keys, in the local `.env` file.
+
+3. Start infrastructure and services:
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up --build
 ```
 
-3. Configure translation provider/model in `.env`:
+4. Configure the translation provider/model in your local `.env`:
 
 ```env
 TRANSLATION_PROVIDER=openai
@@ -55,33 +59,35 @@ OPENAI_API_KEY=replace_me
 
 The worker resolves the concrete translation backend from configuration, so the model can be swapped without changing the task flow or message contract.
 
-4. Run migrations using Docker (from another shell):
+Do not commit `.env`. Keep secrets only in the local file and rotate them if they were ever exposed in the repository history.
+
+5. Run migrations using Docker (from another shell):
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head
 ```
 
-4. Run unit tests using Docker:
+6. Run unit tests using Docker:
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml run --rm tests
 ```
 
-5. Optional local tooling path (if needed):
+7. Optional local tooling path (if needed):
 
 ```bash
 pip install -r requirements.txt
 alembic -c migrations/alembic.ini upgrade head
 ```
 
-6. For future schema changes:
+8. For future schema changes:
 
 ```bash
 alembic -c migrations/alembic.ini revision --autogenerate -m "describe_change"
 alembic -c migrations/alembic.ini upgrade head
 ```
 
-7. Verify API:
+9. Verify API:
 
 ```bash
 curl http://localhost:8000/v1/health
@@ -89,25 +95,35 @@ curl http://localhost:8000/v1/health
 
 ## Current implementation status
 
-The current codebase is verified for the live room flow and reconnect-safe message replay:
+The project is currently verified for the core live-chat and translation workflow in Docker-based local development:
+
+Completed and verified:
 
 - room creation and membership management APIs
 - user profile creation and language preference persistence
-- original message persistence and room fan-out
-- WebSocket room subscription and live message delivery for connected clients
-- room message history fetch with reconnect-safe replay semantics
-- Celery translation queueing and worker-side updates
-- MessageUpdated broadcast with translation patches and room status changes
+- message persistence, replay, and original-message fan-out
+- WebSocket room subscriptions and live message delivery for connected clients
+- recent-message replay and reconnect-safe room history fetches
+- Celery worker translation queueing and async message enrichment
+- MessageUpdated broadcasts with translation patches and status changes
 - browser dashboard at /ui and /ui/rooms/{room_id}
 - provider abstraction with config-driven model selection and fallback behavior
-- transient retry and dead-letter handling for worker failures
+- transient retry, dead-letter, and update event handling for worker failures
+- Docker-first local dev workflow with Postgres, RabbitMQ, Redis, API, and worker services
+
+Current operational reality:
+
+- translation succeeds when the configured external provider is available
+- OpenRouter-compatible providers may return 429 rate-limit responses under load
+- the worker handles those failures gracefully by marking the message as translation_unavailable and emitting an update state
 
 Still pending or follow-on work:
 
-- admin analytics endpoints and aggregated room metrics dashboards
+- admin analytics and room metrics dashboards
 - Redis pub/sub fanout across multiple API replicas
-- structured logging and correlation IDs across API and worker
-- input validation and payload hardening for production use
+- structured observability, correlation IDs, and better traceability across API and worker
+- production hardening for payload validation, quotas, and operational safeguards
+- richer multi-room and multi-user lifecycle management for larger deployment scenarios
 
 ## Web dashboard
 

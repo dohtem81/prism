@@ -20,10 +20,7 @@ Failure path when the translation provider is unavailable:
 4. The original message remains in the room timeline and is not blocked by translation failure.
 5. Translation is treated as enrichment rather than the primary delivery guarantee.
 
-Current runtime note:
-
-- Redis support in the project is present as part of the infrastructure, but multi-instance pub/sub fanout and expanded Redis-backed replay/caching behaviors are not yet part of the active implementation.
-- History and reconnect replay are intentionally deferred for the current stage.
+> **Note:** Multi-instance Redis pub/sub fan-out is not yet implemented. The current runtime uses a single API replica with in-process broadcast.
 
 ## Event Envelope (Realtime)
 

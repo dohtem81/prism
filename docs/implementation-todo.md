@@ -78,5 +78,10 @@ Milestone mapping:
 
 ## Change Log
 
-- 2026-08-05: Initial tracker created.
-- 2026-08-05: Marked Milestone 1 (Foundation) as DONE after docker startup, migrations, health check, and dockerized tests passed.
+| Date | Change |
+|---|---|
+| 2026-08-05 | Initial tracker created |
+| 2026-08-05 | Milestone 1 (Foundation) marked DONE — Docker startup, migrations, health check, and tests passed |
+| 2026-08-09 | Milestones 2 and 3 verified — room/user APIs, realtime fan-out, and translation pipeline operational |
+| 2026-08-11 | Milestones 4 and 5 verified — translation provider abstraction, DLQ, history replay, and full test suite passing |
+| 2026-08-12 | `.env` removed from repository history; documentation refreshed |

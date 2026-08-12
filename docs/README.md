@@ -1,46 +1,66 @@
-# Chat Translation Platform - Implementation Docs
+# Prism — Documentation
 
-This documentation set describes the architecture and implementation contracts for a real-time chat application with server-side LLM translation.
+Real-time multilingual chat platform with server-side LLM translation.
 
-## Document Map
+## Demo
 
-1. [Architecture Overview](architecture-overview.md)
-2. [Components and Responsibilities](components-and-responsibilities.md)
-3. [Data Flow and Contracts](data-flow-and-contracts.md)
-4. [Technology Decisions and Trade-offs](technology-decisions.md)
-5. [Implementation Plan](implementation-plan.md)
-6. [Implementation TODO Tracker](implementation-todo.md)
+Full working flow — messages sent and translated in real time:
+
+![Working app demo](imgs/prim_demo.gif)
+
+Degraded state — translation provider unavailable, original message delivery unaffected:
+
+![LLM unavailable demo](imgs/prims_llm_not%20avaliable.gif)
+
+## Documents
+
+| Document | Purpose |
+|---|---|
+| [Architecture Overview](architecture-overview.md) | System topology, state ownership, and degraded-mode behavior |
+| [Components and Responsibilities](components-and-responsibilities.md) | Component contracts and boundaries |
+| [Data Flow and Contracts](data-flow-and-contracts.md) | Message lifecycle, event schemas, REST and queue contracts |
+| [Technology Decisions](technology-decisions.md) | Stack rationale and trade-offs |
+| [Implementation Plan](implementation-plan.md) | Milestone breakdown with verification evidence |
+| [Implementation TODO](implementation-todo.md) | Current task status and near-term execution order |
 
 ## Scope
 
-- real-time communication using WebSockets for connected clients
-- room-based chat with membership management
-- original message broadcast first, translation appended later
-- live room dashboard for local testing and QA
-- Docker-based local development and deployment baseline
+- Room-based real-time chat with WebSocket delivery
+- Original message broadcast first, translation delivered as an async enrichment
+- Per-user language preference — each member receives translations in their preferred language
+- Provider abstraction with configurable model and fallback
+- Browser dashboard for manual QA and live room verification
+- Docker-based local development and deployment
 
-## Current implementation focus
+## What is implemented
 
-The codebase currently supports the live messaging path, room replay, and message enrichment flow.
+| Feature | Status |
+|---|---|
+| User profile and language preference API | Done |
+| Room creation and membership management API | Done |
+| Message send, persist, and fan-out | Done |
+| WebSocket room subscriptions and live delivery | Done |
+| Room history fetch and reconnect-safe replay | Done |
+| Celery translation worker with provider abstraction | Done |
+| MessageUpdated broadcast with translation patches | Done |
+| Dead-letter handling for provider failures | Done |
+| Browser QA dashboard | Done |
+| Admin analytics and room metrics API | Pending |
+| Multi-instance Redis pub/sub fanout | Pending |
+| Structured observability and correlation IDs | Pending |
 
-Implemented:
+## Secrets and environment
 
-- REST API for users, rooms, and message send flow
-- WebSocket room fanout for MessageCreated and MessageUpdated events
-- room history fetch and reconnect-safe replay of recent messages
-- PostgreSQL persistence for rooms, members, messages, translations, and room events
-- Celery worker translation pipeline with provider abstraction and retries
-- browser dashboard for room-level QA
+Only `.env.example` is tracked in this repository. A real `.env` file is local-only and must never be committed.
 
-Planned / not yet implemented:
+```bash
+cp .env.example .env
+# Add provider API keys and any local overrides
+```
 
-- admin analytics and metrics surfaces
-- multi-instance Redis pub/sub fanout
-- structured observability and production hardening
+## Out of scope for current phase
 
-## Non-Goals for MVP
-
-- End-to-end encryption.
-- Multi-region active-active deployment.
-- Exactly-once delivery semantics.
-- Unlimited language support.
+- End-to-end encryption
+- Multi-region active-active deployment
+- Exactly-once delivery semantics
+- Unlimited language support
