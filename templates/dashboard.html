@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #111827;
+        --panel-alt: #1f2937;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --accent: #60a5fa;
+        --accent-strong: #2563eb;
+        --success: #22c55e;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 260px 1fr;
+        min-height: 100vh;
+      }
+      .sidebar {
+        background: var(--panel);
+        border-right: 1px solid rgba(148,163,184,0.2);
+        padding: 20px 16px;
+      }
+      .sidebar h2 {
+        margin-top: 0;
+        font-size: 1.2rem;
+      }
+      .room-list {
+        list-style: none;
+        padding: 0;
+        margin: 20px 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .room-list a {
+        display: block;
+        color: var(--text);
+        text-decoration: none;
+        border: 1px solid rgba(148,163,184,0.2);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: rgba(148,163,184,0.04);
+      }
+      .content {
+        padding: 24px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 18px;
+      }
+      .status-pill {
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 0.8rem;
+        border: 1px solid rgba(96,165,250,0.5);
+        color: var(--accent);
+        background: rgba(96,165,250,0.08);
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid rgba(148,163,184,0.2);
+        border-radius: 14px;
+        padding: 18px;
+      }
+      .composer {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .composer input {
+        flex: 1;
+        background: var(--panel-alt);
+        border: 1px solid rgba(148,163,184,0.25);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 1rem;
+      }
+      .composer button {
+        background: var(--accent-strong);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 12px 18px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .feed {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 300px;
+      }
+      .message {
+        background: rgba(148,163,184,0.04);
+        border: 1px solid rgba(148,163,184,0.16);
+        border-radius: 12px;
+        padding: 12px 14px;
+      }
+      .message-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .message-body {
+        line-height: 1.5;
+      }
+      .translation {
+        margin-top: 8px;
+        background: rgba(34,197,94,0.06);
+        border-left: 3px solid var(--success);
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: #d1fae5;
+        font-size: 0.9rem;
+      }
+      .empty {
+        color: var(--muted);
+        padding: 18px;
+      }
+      @media (max-width: 800px) {
+        .app { grid-template-columns: 1fr; }
+        .sidebar { border-right: none; border-bottom: 1px solid rgba(148,163,184,0.2); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <h2>Prism</h2>
+        <div class="status-pill" id="connectionState">Connecting…</div>
+        <ul class="room-list" id="roomList"></ul>
+      </aside>
+
+      <main class="content">
+        <div class="topbar">
+          <h1 id="roomTitle">Dashboard</h1>
+          <div class="status-pill" id="roomStatus">Ready</div>
+        </div>
+
+        <section class="panel">
+          <div class="composer">
+            <input id="messageInput" type="text" placeholder="Type a message…" />
+            <button id="sendButton">Send</button>
+          </div>
+
+          <div id="feed" class="feed"></div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const activeUserId = params.get('user_id') || 'dev-user';
+      const activeToken = params.get('token') || 'dev-token';
+      const roomId = {{ room_id|tojson if room_id is defined and room_id else "null" }};
+      const roomName = {{ room_name|tojson if room_name is defined and room_name else '"Dashboard"' }};
+      const wsBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+      const state = {
+        rooms: [],
+        messages: [],
+        socket: null,
+      };
+
+      const roomList = document.getElementById('roomList');
+      const feed = document.getElementById('feed');
+      const roomTitle = document.getElementById('roomTitle');
+      const roomStatus = document.getElementById('roomStatus');
+      const connectionState = document.getElementById('connectionState');
+      const messageInput = document.getElementById('messageInput');
+      const sendButton = document.getElementById('sendButton');
+
+      function roomQueryString() {
+        const search = new URLSearchParams();
+        search.set('user_id', activeUserId);
+        search.set('token', activeToken);
+        return search.toString();
+      }
+
+      function renderRooms() {
+        roomList.innerHTML = '';
+        if (!state.rooms.length) {
+          const li = document.createElement('li');
+          li.className = 'empty';
+          li.textContent = 'No rooms yet';
+          roomList.appendChild(li);
+          return;
+        }
+
+        for (const room of state.rooms) {
+          const item = document.createElement('li');
+          const link = document.createElement('a');
+          const roomUrl = `/ui/rooms/${room.room_id}?${roomQueryString()}`;
+          link.href = roomUrl;
+          link.textContent = room.name;
+          item.appendChild(link);
+          roomList.appendChild(item);
+        }
+      }
+
+      function renderMessages() {
+        feed.innerHTML = '';
+        if (!state.messages.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = 'No messages yet in this room.';
+          feed.appendChild(empty);
+          return;
+        }
+
+        for (const message of state.messages) {
+          const card = document.createElement('div');
+          card.className = 'message';
+
+          const header = document.createElement('div');
+          header.className = 'message-header';
+          header.innerHTML = `<span>${message.author_user_id}</span><span>${new Date(message.created_at).toLocaleString()}</span>`;
+
+          const body = document.createElement('div');
+          body.className = 'message-body';
+          body.textContent = message.content_original || '…';
+
+          card.appendChild(header);
+          card.appendChild(body);
+
+          if (message.translations && Object.keys(message.translations).length) {
+            const list = document.createElement('div');
+            list.className = 'translation';
+            const entries = Object.entries(message.translations).map(([lang, value]) => `${lang}: ${value.content}`).join(' | ');
+            list.textContent = entries;
+            card.appendChild(list);
+          }
+
+          feed.appendChild(card);
+        }
+      }
+
+      function setConnectionState(value) {
+        connectionState.textContent = value;
+      }
+
+      async function fetchRooms() {
+        try {
+          const response = await fetch(`/v1/rooms?user_id=${encodeURIComponent(activeUserId)}`, {
+            headers: { Authorization: `Bearer ${activeToken}` }
+          });
+          if (!response.ok) {
+            throw new Error('rooms unavailable');
+          }
+          state.rooms = await response.json();
+          renderRooms();
+          if (!roomId && state.rooms.length) {
+            window.location.href = `/ui/rooms/${state.rooms[0].room_id}?${roomQueryString()}`;
+          }
+        } catch (error) {
+          console.error('Failed to load rooms', error);
+        }
+      }
+
+      function connectSocket() {
+        if (!roomId) return;
+        if (state.socket) {
+          state.socket.close();
+        }
+
+        const socketUrl = `${wsBase}/ws/${roomId}?token=${encodeURIComponent(activeToken)}&user_id=${encodeURIComponent(activeUserId)}`;
+        const socket = new WebSocket(socketUrl);
+        state.socket = socket;
+
+        socket.onopen = () => {
+          setConnectionState('Connected');
+          roomStatus.textContent = 'Live';
+        };
+
+        socket.onmessage = (event) => {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'MessageCreated') {
+            const message = payload.message;
+            state.messages = [...state.messages.filter(item => item.message_id !== message.message_id), message];
+            renderMessages();
+          }
+
+          if (payload.type === 'MessageUpdated') {
+            const existing = state.messages.find(item => item.message_id === payload.message_id);
+            if (existing) {
+              existing.translations = payload.translations;
+              existing.status = payload.status;
+            }
+            renderMessages();
+          }
+        };
+
+        socket.onclose = () => {
+          setConnectionState('Disconnected');
+          roomStatus.textContent = 'Reconnecting…';
+          setTimeout(connectSocket, 2000);
+        };
+
+        socket.onerror = () => {
+          setConnectionState('Error');
+        };
+      }
+
+      async function sendMessage() {
+        if (!roomId) return;
+        const content = messageInput.value.trim();
+        if (!content) return;
+
+        const payload = {
+          author_user_id: activeUserId,
+          room_id: roomId,
+          client_message_id: `ui-${Date.now()}`,
+          source_lang: 'en',
+          content_original: content,
+        };
+
+        try {
+          const response = await fetch(`/v1/messages?user_id=${encodeURIComponent(activeUserId)}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${activeToken}`
+            },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            throw new Error('send failed');
+          }
+          messageInput.value = '';
+        } catch (error) {
+          console.error('Failed to send message', error);
+        }
+      }
+
+      sendButton.addEventListener('click', sendMessage);
+      messageInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          sendMessage();
+        }
+      });
+
+      if (roomId) {
+        roomTitle.textContent = roomName || 'Room';
+        connectSocket();
+      } else {
+        roomTitle.textContent = 'Dashboard';
+      }
+
+      fetchRooms();
+    </script>
+  </body>
+</html>

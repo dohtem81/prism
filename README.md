@@ -97,6 +97,15 @@ The core flow is in place and verified:
 - provider abstraction with config-driven model selection and fallback
 - transient retry + dead-letter dispatch for translation failures
 
+## Web dashboard
+
+A lightweight browser dashboard is now available through the FastAPI app at:
+
+- /ui
+- /ui/rooms/{room_id}
+
+This keeps the backend contract stable while providing a simple room-level status view for local testing and future expansion.
+
 ## Run Unit Tests
 
 Local:
