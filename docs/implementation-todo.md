@@ -1,45 +1,26 @@
-# Implementation TODO Tracker
+# Implementation TODO
 
-This document tracks implementation work, current status, and next actions.
+Tracks current task status and next actions.
 
-Status legend:
+**Status legend:** `TODO` · `IN_PROGRESS` · `BLOCKED` · `DONE`
 
-- TODO: Not started
-- IN_PROGRESS: Actively being implemented
-- BLOCKED: Waiting on dependency or decision
-- DONE: Completed and verified
+---
 
-## How To Update
+## Phase summary
 
-1. Change Status for the item.
-2. Update Last Updated date.
-3. Add short progress notes.
-4. If blocked, include blocker details in Notes.
+| Milestone | Status |
+|---|---|
+| Milestone 1 — Foundation | DONE |
+| Milestone 2 — Room and Auth APIs | DONE |
+| Milestone 3 — Realtime Messaging and History | DONE |
+| Milestone 4 — Translation Pipeline | DONE |
+| Milestone 5 — History Replay | DONE |
+| Milestone 6 — Observability | TODO |
+| Milestone 7 — Analytics | TODO |
 
-## Current Roadmap Items
+---
 
-Working convention:
-
-- Docker-first execution is the default for local development, tests, and verification.
-- Prefer compose-based commands over bare Python or pytest commands unless a Docker path is unavailable.
-- The canonical compose entrypoint is `docker compose -f deploy/compose/docker-compose.yml ...`.
-
-Phase summary:
-
-- Milestone 1 (Foundation): DONE
-- Milestone 2 (Room and Auth APIs): DONE for the implemented auth/room/user-profile pieces.
-- Milestone 3 (Realtime Messaging and History): DONE for the live room path and reconnect-safe history replay.
-- Milestones 4-7: Planned follow-on work after the live room path is stabilized.
-
-Milestone mapping:
-
-- Milestone 1: P1-01, P1-02
-- Milestone 2: P1-03, P1-04, P1-16, P1-17
-- Milestone 3: P1-05, P1-06, P1-14
-- Milestone 4: P1-07, P1-08, P1-09
-- Milestone 6: P1-12, P1-13, P1-15
-- Milestone 7: P1-11
-- Cross-cutting/local QA: P1-10
+## Task tracker
 
 | ID | Milestone | Area | Task | Status | Priority | Last Updated | Notes |
 |---|---|---|---|---|---|---|---|
@@ -62,21 +43,18 @@ Milestone mapping:
 | P1-15 | Milestone 6 | Security | Validate input limits and enforce payload size checks | TODO | Medium | 2026-08-11 | Prevent abuse and oversized requests. |
 | P1-18 | Milestone 5 | History | Build room history API and reconnect replay | DONE | Medium | 2026-08-11 | The room history endpoint and reconnect-safe replay logic are implemented and validated in the live room flow. |
 
-## Near-Term Execution Order
+---
 
-1. Keep the current live room flow as the baseline for chat behavior.
-2. Focus on production hardening: metrics, structured logs, and input validation.
-3. Complete the analytics layer for room admin metrics and cost visibility.
-4. Extend the runtime for multi-instance fanout and operational resilience.
+## Next up
 
-## Phase 4 Execution Focus
+1. Production hardening — structured logs, correlation IDs, and input validation (P1-12, P1-13, P1-15).
+2. Analytics layer — room admin metrics and cost visibility (P1-11).
+3. Multi-instance fanout — Redis pub/sub across API replicas.
+4. Dev tooling — seed/bootstrap script for quick local QA (P1-10).
 
-- P1-07: add retry and DLQ handling for translation worker failures.
-- P1-08: extract a translation provider adapter so the worker logic is testable.
-- P1-09: ensure translation_unavailable is surfaced cleanly when providers fail.
-- P1-14: add an integration test for send message -> translation -> MessageUpdated.
+---
 
-## Change Log
+## Change log
 
 | Date | Change |
 |---|---|
@@ -85,3 +63,4 @@ Milestone mapping:
 | 2026-08-09 | Milestones 2 and 3 verified — room/user APIs, realtime fan-out, and translation pipeline operational |
 | 2026-08-11 | Milestones 4 and 5 verified — translation provider abstraction, DLQ, history replay, and full test suite passing |
 | 2026-08-12 | `.env` removed from repository history; documentation refreshed |
+| 2026-08-12 | Docs rewritten for clarity; Mermaid diagrams added to README and data-flow doc |
