@@ -37,3 +37,21 @@ class RoomMembershipResponse(BaseModel):
     role: str
     preferred_lang: str
     created_at: datetime
+
+
+class RoomMessageTranslation(BaseModel):
+    content: str
+    provider: str
+    quality_mode: str | None = None
+    translated_at: datetime | None = None
+
+
+class RoomMessageResponse(BaseModel):
+    message_id: str
+    version: int
+    author_user_id: str
+    source_lang: str
+    content_original: str
+    status: str
+    created_at: datetime
+    translations: dict[str, RoomMessageTranslation] = {}

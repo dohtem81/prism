@@ -2,32 +2,28 @@
 
 ## End-to-End Message Flow
 
-1. Client sends SendMessage over WebSocket.
-2. Gateway validates auth and routes to Message Service.
-3. Message Service persists message (version = 1, status = original_only).
-4. Gateway broadcasts MessageCreated immediately.
-5. Message Service publishes TranslationRequested job.
-6. Worker translates to unique target languages.
-7. Worker persists each translation and updates message version.
-8. Gateway broadcasts MessageUpdated events.
-9. Clients patch message by message_id.
+1. Client calls the REST message endpoint to create a message in a room.
+2. API validates auth and room membership.
+3. API persists the original message with version = 1 and status = original_only.
+4. API broadcasts a MessageCreated event to all connected room subscribers.
+5. API queues a translation job for the worker.
+6. Worker computes target languages and translates the content.
+7. Worker persists translations and updates the message version and status.
+8. Worker broadcasts a MessageUpdated event to the room.
+9. Clients patch or render the updated message in place by message_id.
 
-Failure path when LLM API is unavailable:
+Failure path when the translation provider is unavailable:
 
 1. Steps 1 through 5 still execute unchanged.
-2. Worker retries translation according to policy.
-3. On exhausted retries or circuit-open state, worker records translation as unavailable.
-4. Gateway may broadcast MessageUpdated with unchanged content and status translation_unavailable.
-5. Chat timeline remains complete because original message was already delivered in step 4 of the primary flow.
+2. Worker retries according to policy.
+3. On exhaustion or provider failure, the worker marks the message as translation_unavailable or partially_translated when applicable.
+4. The original message remains in the room timeline and is not blocked by translation failure.
+5. Translation is treated as enrichment rather than the primary delivery guarantee.
 
-Redis-assisted behavior during this flow:
+Current runtime note:
 
-- Gateway reads room metadata and membership language hints from Redis cache first, then falls back to PostgreSQL.
-- Gateway writes presence heartbeats to Redis TTL keys.
-- API instances publish realtime events to Redis pub-sub so all connected instances can fan out updates.
-- Worker checks Redis translation cache before calling the LLM provider.
-- Rate limits and short dedup windows are enforced with Redis counters and keys.
-- Worker emits translation telemetry events for room-level cost and delay tracking.
+- Redis support in the project is present as part of the infrastructure, but multi-instance pub/sub fanout and expanded Redis-backed replay/caching behaviors are not yet part of the active implementation.
+- History and reconnect replay are intentionally deferred for the current stage.
 
 ## Event Envelope (Realtime)
 

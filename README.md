@@ -89,22 +89,34 @@ curl http://localhost:8000/v1/health
 
 ## Current implementation status
 
-The core flow is in place and verified:
+The current codebase is verified for the live room flow and reconnect-safe message replay:
 
-- original-message creation and room fan-out
-- worker translation queueing for each member language
-- MessageUpdated event broadcast with translation patch data
-- provider abstraction with config-driven model selection and fallback
-- transient retry + dead-letter dispatch for translation failures
+- room creation and membership management APIs
+- user profile creation and language preference persistence
+- original message persistence and room fan-out
+- WebSocket room subscription and live message delivery for connected clients
+- room message history fetch with reconnect-safe replay semantics
+- Celery translation queueing and worker-side updates
+- MessageUpdated broadcast with translation patches and room status changes
+- browser dashboard at /ui and /ui/rooms/{room_id}
+- provider abstraction with config-driven model selection and fallback behavior
+- transient retry and dead-letter handling for worker failures
+
+Still pending or follow-on work:
+
+- admin analytics endpoints and aggregated room metrics dashboards
+- Redis pub/sub fanout across multiple API replicas
+- structured logging and correlation IDs across API and worker
+- input validation and payload hardening for production use
 
 ## Web dashboard
 
-A lightweight browser dashboard is now available through the FastAPI app at:
+A lightweight browser dashboard is available through the FastAPI app at:
 
 - /ui
 - /ui/rooms/{room_id}
 
-This keeps the backend contract stable while providing a simple room-level status view for local testing and future expansion.
+This is intended for local verification and manual QA of room membership, send flow, live message updates, and reconnect-safe recent-message replay.
 
 ## Run Unit Tests
 

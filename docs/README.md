@@ -13,11 +13,30 @@ This documentation set describes the architecture and implementation contracts f
 
 ## Scope
 
-- Real-time communication using WebSockets.
-- Room-based chat with membership management.
-- Original message broadcast first, translation appended later.
-- Message history persistence and replay.
-- Docker-based local development and deployment baseline.
+- real-time communication using WebSockets for connected clients
+- room-based chat with membership management
+- original message broadcast first, translation appended later
+- live room dashboard for local testing and QA
+- Docker-based local development and deployment baseline
+
+## Current implementation focus
+
+The codebase currently supports the live messaging path, room replay, and message enrichment flow.
+
+Implemented:
+
+- REST API for users, rooms, and message send flow
+- WebSocket room fanout for MessageCreated and MessageUpdated events
+- room history fetch and reconnect-safe replay of recent messages
+- PostgreSQL persistence for rooms, members, messages, translations, and room events
+- Celery worker translation pipeline with provider abstraction and retries
+- browser dashboard for room-level QA
+
+Planned / not yet implemented:
+
+- admin analytics and metrics surfaces
+- multi-instance Redis pub/sub fanout
+- structured observability and production hardening
 
 ## Non-Goals for MVP
 
