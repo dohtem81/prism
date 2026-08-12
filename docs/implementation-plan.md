@@ -61,7 +61,7 @@ Notes:
 
 Status:
 
-- IMPLEMENTED (verified 2026-08-09) as an initial in-process slice.
+- IMPLEMENTED (verified 2026-08-11) as an initial in-process slice.
 
 Deliverables:
 
@@ -84,7 +84,7 @@ Notes:
 
 Status:
 
-- IMPLEMENTED (verified 2026-08-09) as an initial backend translation-update slice.
+- IMPLEMENTED (verified 2026-08-11) as the current backend translation-update slice.
 
 Deliverables:
 
@@ -108,8 +108,9 @@ Definition of done:
 Notes:
 
 - The current implementation persists translations, updates message status, and emits a MessageUpdated event that preserves the original message id and includes the original message plus translations.
-- The worker now uses a translation provider abstraction, and the unit test suite validates the translation-update path.
-- Queue/worker hardening and more explicit retry semantics remain future follow-up work.
+- The worker now uses a translation provider abstraction, and provider/model selection is configuration-driven via `TRANSLATION_PROVIDER` and `TRANSLATION_MODEL` with fallback support.
+- The unit test suite validates the translation-update path, provider resolution behavior, dead-letter routing, and the send-message-to-translation-update flow.
+- Retry and DLQ behavior is now in place for transient provider failures, and permanent failures are sent to the `translation.failed.q` queue.
 
 ## Milestone 5: History and Replay
 
