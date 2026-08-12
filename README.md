@@ -43,7 +43,19 @@ cp .env.example .env
 docker compose -f deploy/compose/docker-compose.yml up --build
 ```
 
-3. Run migrations using Docker (from another shell):
+3. Configure translation provider/model in `.env`:
+
+```env
+TRANSLATION_PROVIDER=openai
+TRANSLATION_MODEL=gpt-4.1-mini
+TRANSLATION_FALLBACK_PROVIDER=openai
+TRANSLATION_FALLBACK_MODEL=gpt-4.1-mini
+OPENAI_API_KEY=replace_me
+```
+
+The worker resolves the concrete translation backend from configuration, so the model can be swapped without changing the task flow or message contract.
+
+4. Run migrations using Docker (from another shell):
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head
@@ -74,6 +86,16 @@ alembic -c migrations/alembic.ini upgrade head
 ```bash
 curl http://localhost:8000/v1/health
 ```
+
+## Current implementation status
+
+The core flow is in place and verified:
+
+- original-message creation and room fan-out
+- worker translation queueing for each member language
+- MessageUpdated event broadcast with translation patch data
+- provider abstraction with config-driven model selection and fallback
+- transient retry + dead-letter dispatch for translation failures
 
 ## Run Unit Tests
 

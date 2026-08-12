@@ -1,7 +1,16 @@
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from services.worker.app.tasks.translation import _cache_key, _estimate_cost_usd, translate_message
+import pytest
+
+from services.worker.app.tasks.translation import (
+    OpenAITranslationProvider,
+    _cache_key,
+    _estimate_cost_usd,
+    build_translation_provider,
+    run_translation_task,
+    translate_message,
+)
 
 
 def test_cache_key_is_deterministic() -> None:
@@ -23,6 +32,68 @@ def test_estimate_cost_returns_value() -> None:
     assert _estimate_cost_usd(1000, 1000) == 0.001
 
 
+def test_build_translation_provider_uses_configured_model() -> None:
+    provider = build_translation_provider(provider_name="openai", model_name="gpt-4o-mini")
+
+    assert isinstance(provider, OpenAITranslationProvider)
+    assert provider.model == "gpt-4o-mini"
+
+
+def test_build_translation_provider_rejects_unknown_provider() -> None:
+    with pytest.raises(ValueError, match="Unsupported translation provider"):
+        build_translation_provider(provider_name="unknown")
+
+
+def test_run_translation_task_sends_failed_job_to_dead_letter_queue() -> None:
+    with patch("services.worker.app.tasks.translation.build_translation_provider", side_effect=TimeoutError("provider timeout")):
+        with patch("services.worker.app.tasks.translation.celery_app.send_task") as send_task_mock:
+            with patch("services.worker.app.tasks.translation.SessionLocal") as session_local_mock:
+                message = MagicMock()
+                message.created_at = datetime.now(timezone.utc)
+                message.status = "original_only"
+                message.version = 1
+
+                room = MagicMock()
+                room.default_translation_mode = "balanced"
+
+                db = MagicMock()
+                db.scalar.side_effect = [message, room]
+                member = MagicMock()
+                member.preferred_lang = "de"
+                db.scalars.return_value.all.return_value = [member]
+
+                session_local_mock.return_value.__enter__.return_value = db
+                session_local_mock.return_value.__exit__.return_value = False
+
+                result = run_translation_task("msg_1", "room_1", "pl", "Czesc")
+
+                assert result["status"] == "dead_letter"
+                send_task_mock.assert_called_once_with(
+                    "services.worker.app.tasks.translation.dead_letter_translation",
+                    kwargs={
+                        "message_id": "msg_1",
+                        "room_id": "room_1",
+                        "source_lang": "pl",
+                        "content_original": "Czesc",
+                        "error_type": "TimeoutError",
+                        "error_message": "provider timeout",
+                    },
+                    queue="translation.failed.q",
+                )
+
+
+def test_build_translation_provider_uses_configured_fallback() -> None:
+    provider = build_translation_provider(
+        provider_name="unknown",
+        model_name="gpt-4o-mini",
+        fallback_provider_name="openai",
+        fallback_model_name="gpt-4o-mini",
+    )
+
+    assert isinstance(provider, OpenAITranslationProvider)
+    assert provider.model == "gpt-4o-mini"
+
+
 @patch("services.worker.app.tasks.translation.SessionLocal")
 def test_translate_message_returns_not_found_when_message_missing(session_local_mock: MagicMock) -> None:
     db = MagicMock()
@@ -31,7 +102,7 @@ def test_translate_message_returns_not_found_when_message_missing(session_local_
     session_local_mock.return_value.__enter__.return_value = db
     session_local_mock.return_value.__exit__.return_value = False
 
-    result = translate_message("msg_1", "room_1", "pl", "Czesc")
+    result = run_translation_task("msg_1", "room_1", "pl", "Czesc")
 
     assert result["status"] == "not_found"
 
@@ -56,7 +127,7 @@ def test_translate_message_handles_no_target_languages(session_local_mock: Magic
     session_local_mock.return_value.__enter__.return_value = db
     session_local_mock.return_value.__exit__.return_value = False
 
-    result = translate_message("msg_1", "room_1", "pl", "Czesc")
+    result = run_translation_task("msg_1", "room_1", "pl", "Czesc")
 
     assert result["status"] == "no_target_languages"
     assert message.status == "translated"

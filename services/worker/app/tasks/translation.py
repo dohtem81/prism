@@ -19,12 +19,15 @@ class TranslationProvider:
 
 
 class OpenAITranslationProvider(TranslationProvider):
-    def __init__(self) -> None:
+    def __init__(self, model: str | None = None) -> None:
+        self.model = model or settings.translation_model or settings.openai_translation_model
+        if not settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is not configured")
         self._client = OpenAI(api_key=settings.openai_api_key)
 
     def translate(self, content_original: str, source_lang: str, target_lang: str) -> tuple[str, int | None, int | None]:
         response = self._client.responses.create(
-            model=settings.openai_translation_model,
+            model=self.model,
             input=(
                 "Translate the message while preserving intent and tone. "
                 f"Translate from {source_lang} to {target_lang}. "
@@ -38,10 +41,47 @@ class OpenAITranslationProvider(TranslationProvider):
         return response.output_text.strip(), input_tokens, output_tokens
 
 
-def build_translation_provider() -> TranslationProvider:
-    if not settings.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured")
-    return OpenAITranslationProvider()
+_TRANSLATION_PROVIDERS: dict[str, type[TranslationProvider]] = {
+    "openai": OpenAITranslationProvider,
+}
+
+
+def _resolve_provider_and_model(
+    provider_name: str | None = None,
+    model_name: str | None = None,
+    fallback_provider_name: str | None = None,
+    fallback_model_name: str | None = None,
+) -> tuple[str, str]:
+    selected_provider = (provider_name or settings.translation_provider or "openai").lower()
+    selected_model = model_name or settings.translation_model or settings.openai_translation_model
+
+    if selected_provider in _TRANSLATION_PROVIDERS:
+        return selected_provider, selected_model
+
+    fallback_provider = (fallback_provider_name or settings.translation_fallback_provider or "").lower()
+    fallback_model = fallback_model_name or settings.translation_fallback_model or selected_model
+
+    if fallback_provider in _TRANSLATION_PROVIDERS:
+        return fallback_provider, fallback_model
+
+    raise ValueError(f"Unsupported translation provider: {selected_provider}")
+
+
+def build_translation_provider(
+    provider_name: str | None = None,
+    model_name: str | None = None,
+    fallback_provider_name: str | None = None,
+    fallback_model_name: str | None = None,
+) -> TranslationProvider:
+    selected_provider_name, selected_model_name = _resolve_provider_and_model(
+        provider_name=provider_name,
+        model_name=model_name,
+        fallback_provider_name=fallback_provider_name,
+        fallback_model_name=fallback_model_name,
+    )
+
+    provider_cls = _TRANSLATION_PROVIDERS[selected_provider_name]
+    return provider_cls(model=selected_model_name)
 
 from services.worker.app.celery_app import celery_app
 from services.worker.app.infra.settings import settings
@@ -67,8 +107,52 @@ def _estimate_cost_usd(input_tokens: int | None, output_tokens: int | None) -> f
     return round(((input_tokens * 0.20) + (output_tokens * 0.80)) / 1_000_000, 6)
 
 
-@celery_app.task(name="services.worker.app.tasks.translation.translate_message")
-def translate_message(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
+def _broadcast_room_event(room_id: str, payload: dict) -> None:
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(manager.broadcast(room_id, payload))
+        return
+
+    running_loop.create_task(manager.broadcast(room_id, payload))
+
+
+def _send_to_dead_letter(
+    message_id: str,
+    room_id: str,
+    source_lang: str,
+    content_original: str,
+    error: Exception,
+) -> None:
+    celery_app.send_task(
+        "services.worker.app.tasks.translation.dead_letter_translation",
+        kwargs={
+            "message_id": message_id,
+            "room_id": room_id,
+            "source_lang": source_lang,
+            "content_original": content_original,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+        },
+        queue="translation.failed.q",
+    )
+
+
+def run_translation_task(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
+    try:
+        return _run_translation_task(message_id, room_id, source_lang, content_original)
+    except Exception as exc:
+        _send_to_dead_letter(message_id, room_id, source_lang, content_original, exc)
+        return {
+            "message_id": message_id,
+            "room_id": room_id,
+            "status": "dead_letter",
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        }
+
+
+def _run_translation_task(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
     with SessionLocal() as db:
         message = db.scalar(select(Message).where(Message.id == message_id))
         room = db.scalar(select(Room).where(Room.id == room_id))
@@ -226,10 +310,7 @@ def translate_message(message_id: str, room_id: str, source_lang: str, content_o
         db.add(outbox_event)
         db.commit()
 
-        try:
-            asyncio.get_running_loop().create_task(manager.broadcast(room_id, event_payload))
-        except RuntimeError:
-            asyncio.run(manager.broadcast(room_id, event_payload))
+        _broadcast_room_event(room_id, event_payload)
 
         return {
             "message_id": message_id,
@@ -239,3 +320,34 @@ def translate_message(message_id: str, room_id: str, source_lang: str, content_o
             "failed_translations": str(failure_count),
             "translations_patch": json.dumps(translations_patch),
         }
+
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(TimeoutError, ConnectionError, OSError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3, "countdown": 5},
+    name="services.worker.app.tasks.translation.translate_message",
+)
+def translate_message(self, message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
+    return run_translation_task(message_id, room_id, source_lang, content_original)
+
+
+@celery_app.task(name="services.worker.app.tasks.translation.dead_letter_translation")
+def dead_letter_translation(
+    message_id: str,
+    room_id: str,
+    source_lang: str,
+    content_original: str,
+    error_type: str,
+    error_message: str,
+) -> dict[str, str]:
+    return {
+        "message_id": message_id,
+        "room_id": room_id,
+        "status": "dead_letter",
+        "source_lang": source_lang,
+        "content_original": content_original,
+        "error_type": error_type,
+        "error_message": error_message,
+    }

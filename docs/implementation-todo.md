@@ -48,9 +48,9 @@ Milestone mapping:
 | P1-03 | Milestone 2 | API | Replace temporary X-User-Id auth with JWT auth | DONE | High | 2026-08-09 | JWT-based auth is now implemented and covered by unit tests. |
 | P1-04 | Milestone 2 | API | Add room creation and membership endpoints | DONE | High | 2026-08-09 | Room creation and membership management endpoints are implemented. |
 | P1-05 | Milestone 3 | Messaging | Implement MessageCreated realtime fanout from outbox | DONE | High | 2026-08-09 | MessageCreated fanout is implemented for connected room subscribers through the realtime gateway. |
-| P1-06 | Milestone 3 | Messaging | Implement MessageUpdated realtime fanout from outbox | TODO | High | 2026-08-05 | MessageUpdated fanout remains pending; Phase 3 currently covers original-message delivery only. |
-| P1-07 | Milestone 4 | Worker | Add robust retry policy and DLQ handling strategy | TODO | Medium | 2026-08-09 | The initial translation path is implemented; retry and DLQ hardening remain as follow-on work. |
-| P1-08 | Milestone 4 | Worker | Improve translation provider abstraction (adapter interface) | DONE | Medium | 2026-08-09 | A provider abstraction is now implemented and exercised by unit tests. |
+| P1-06 | Milestone 3 | Messaging | Implement MessageUpdated realtime fanout from outbox | DONE | High | 2026-08-11 | MessageUpdated fanout is verified in the realtime unit tests and delivered to room subscribers. |
+| P1-07 | Milestone 4 | Worker | Add robust retry policy and DLQ handling strategy | DONE | Medium | 2026-08-11 | The worker retries transient provider failures and dispatches permanent failures to the `translation.failed.q` dead-letter queue. |
+| P1-08 | Milestone 4 | Worker | Improve translation provider abstraction (adapter interface) | DONE | Medium | 2026-08-11 | A provider abstraction is now implemented and exercised by unit tests, with configuration-driven provider/model selection and fallback handling. |
 | P1-09 | Milestone 4 | Worker | Add fallback policy when translation unavailable | DONE | High | 2026-08-09 | translation_unavailable status is set in the current worker flow when translations fail. |
 | P1-10 | Cross-cutting | Data | Add seed/dev bootstrap script for users/rooms/members | TODO | Medium | 2026-08-05 | Speeds local QA and API testing. |
 | P1-11 | Milestone 7 | Analytics | Build room admin metrics summary endpoint | TODO | Medium | 2026-08-05 | Contract exists in docs, implementation pending. |
@@ -58,7 +58,7 @@ Milestone mapping:
 | P1-17 | Milestone 2 | Data | Add user-level preferred language migration | DONE | High | 2026-08-09 | Alembic migration `0002_add_user_preferred_lang` applied successfully in Docker. |
 | P1-12 | Milestone 6 | Observability | Add structured logging and correlation ids | TODO | Medium | 2026-08-05 | Needed across api + worker + outbox publisher. |
 | P1-13 | Milestone 6 | Observability | Add basic metrics for queue delay and translation latency | TODO | Medium | 2026-08-05 | Start with counters/histograms and dashboard stub. |
-| P1-14 | Milestone 3 / 4 | Testing | Add integration test: send message -> queued -> translated | TODO | High | 2026-08-05 | Cover idempotency and translation_unavailable path. |
+| P1-14 | Milestone 3 / 4 | Testing | Add integration test: send message -> queued -> translated | DONE | High | 2026-08-11 | A full send-message-to-translation-update flow test is included in the unit regression suite. |
 | P1-15 | Milestone 6 | Security | Validate input limits and enforce payload size checks | TODO | Medium | 2026-08-05 | Prevent abuse and oversized requests. |
 
 ## Near-Term Execution Order
