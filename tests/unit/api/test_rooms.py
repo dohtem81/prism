@@ -111,7 +111,11 @@ def test_list_room_messages_returns_messages_and_translations() -> None:
 
     db.get.side_effect = [room, None]
     db.scalar.side_effect = [membership]
-    db.scalars.side_effect = [[message], [translation]]
+    messages_result = MagicMock()
+    messages_result.all.return_value = [message]
+    translations_result = MagicMock()
+    translations_result.all.return_value = [translation]
+    db.scalars.side_effect = [messages_result, translations_result]
 
     response = list_room_messages(room_id="room_1", db=db, current_user_id="user_1", limit=50)
 
@@ -168,7 +172,11 @@ def test_list_room_messages_filters_by_since_message_id() -> None:
 
     db.get.side_effect = [room]
     db.scalar.side_effect = [membership, anchor]
-    db.scalars.return_value.all.return_value = [message]
+    messages_result = MagicMock()
+    messages_result.all.return_value = [message]
+    translations_result = MagicMock()
+    translations_result.all.return_value = []
+    db.scalars.side_effect = [messages_result, translations_result]
 
     response = list_room_messages(room_id="room_1", db=db, current_user_id="user_1", limit=50, since_message_id="msg_old")
 
@@ -176,9 +184,17 @@ def test_list_room_messages_filters_by_since_message_id() -> None:
     assert response[0].message_id == "msg_new"
 
 
-def test_message_is_after_anchor_uses_id_tiebreaker_for_same_timestamp() -> None:
-    shared_time = datetime(2026, 8, 11, 1, 2, 3, tzinfo=timezone.utc)
-    anchor = Message(
+def test_list_room_messages_returns_recent_window_in_ascending_order() -> None:
+    db = MagicMock()
+    room = Room(id="room_1", name="Alpha", default_translation_mode="balanced", created_at=datetime.now(timezone.utc))
+    membership = RoomMember(
+        room_id="room_1",
+        user_id="user_1",
+        role="member",
+        preferred_lang="en",
+        created_at=datetime.now(timezone.utc),
+    )
+    old_message = Message(
         id="msg_old",
         room_id="room_1",
         author_user_id="user_1",
@@ -187,13 +203,88 @@ def test_message_is_after_anchor_uses_id_tiebreaker_for_same_timestamp() -> None
         content_original="old",
         status="original_only",
         version=1,
+        created_at=datetime(2026, 8, 11, 1, 0, tzinfo=timezone.utc),
+    )
+    mid_message = Message(
+        id="msg_mid",
+        room_id="room_1",
+        author_user_id="user_1",
+        client_message_id="c_mid",
+        source_lang="en",
+        content_original="mid",
+        status="original_only",
+        version=1,
+        created_at=datetime(2026, 8, 11, 1, 1, tzinfo=timezone.utc),
+    )
+    new_message = Message(
+        id="msg_new",
+        room_id="room_1",
+        author_user_id="user_1",
+        client_message_id="c_new",
+        source_lang="en",
+        content_original="new",
+        status="original_only",
+        version=1,
+        created_at=datetime(2026, 8, 11, 1, 2, tzinfo=timezone.utc),
+    )
+
+    db.get.side_effect = [room]
+    db.scalar.return_value = membership
+    messages_result = MagicMock()
+    messages_result.all.return_value = [new_message, mid_message]
+    mid_translations_result = MagicMock()
+    mid_translations_result.all.return_value = []
+    new_translations_result = MagicMock()
+    new_translations_result.all.return_value = []
+    db.scalars.side_effect = [
+        messages_result,
+        mid_translations_result,
+        new_translations_result,
+    ]
+
+    response = list_room_messages(room_id="room_1", db=db, current_user_id="user_1", limit=2)
+
+    assert [message.message_id for message in response] == ["msg_mid", "msg_new"]
+
+
+def test_list_room_messages_rejects_anchor_from_another_room() -> None:
+    db = MagicMock()
+    room = Room(id="room_1", name="Alpha", default_translation_mode="balanced", created_at=datetime.now(timezone.utc))
+    membership = RoomMember(
+        room_id="room_1",
+        user_id="user_1",
+        role="member",
+        preferred_lang="en",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    db.get.side_effect = [room]
+    db.scalar.side_effect = [membership, None]
+
+    with pytest.raises(HTTPException) as exc:
+        list_room_messages(room_id="room_1", db=db, current_user_id="user_1", limit=50, since_message_id="msg_other_room")
+
+    assert exc.value.status_code == 404
+
+
+def test_message_is_after_anchor_uses_id_tiebreaker_for_same_timestamp() -> None:
+    shared_time = datetime(2026, 8, 11, 1, 2, 3, tzinfo=timezone.utc)
+    anchor = Message(
+        id="msg_100",
+        room_id="room_1",
+        author_user_id="user_1",
+        client_message_id="c_100",
+        source_lang="en",
+        content_original="old",
+        status="original_only",
+        version=1,
         created_at=shared_time,
     )
     newer_message = Message(
-        id="msg_new",
+        id="msg_101",
         room_id="room_1",
         author_user_id="user_2",
-        client_message_id="c_new",
+        client_message_id="c_101",
         source_lang="en",
         content_original="new",
         status="original_only",
@@ -201,10 +292,10 @@ def test_message_is_after_anchor_uses_id_tiebreaker_for_same_timestamp() -> None
         created_at=shared_time,
     )
     older_same_time_message = Message(
-        id="msg_older",
+        id="msg_099",
         room_id="room_1",
         author_user_id="user_3",
-        client_message_id="c_older",
+        client_message_id="c_099",
         source_lang="en",
         content_original="older",
         status="original_only",

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from services.api.app.auth.dependencies import get_current_user_id
@@ -150,16 +150,37 @@ def list_room_messages(
     if not membership:
         raise HTTPException(status_code=403, detail="User is not a room member")
 
-    query = select(Message).where(Message.room_id == room_id)
     if since_message_id:
-        anchor = db.scalar(select(Message).where(Message.id == since_message_id))
-    else:
-        anchor = None
+        anchor = db.scalar(
+            select(Message).where(
+                Message.room_id == room_id,
+                Message.id == since_message_id,
+            )
+        )
+        if anchor is None:
+            raise HTTPException(status_code=404, detail="Anchor message not found")
 
-    query = query.order_by(Message.created_at.asc(), Message.id.asc()).limit(limit)
-    messages = db.scalars(query).all()
-    if anchor is not None:
-        messages = [message for message in messages if _message_is_after_anchor(message, anchor)]
+        query = (
+            select(Message)
+            .where(
+                Message.room_id == room_id,
+                or_(
+                    Message.created_at > anchor.created_at,
+                    and_(Message.created_at == anchor.created_at, Message.id > anchor.id),
+                ),
+            )
+            .order_by(Message.created_at.asc(), Message.id.asc())
+            .limit(limit)
+        )
+        messages = db.scalars(query).all()
+    else:
+        query = (
+            select(Message)
+            .where(Message.room_id == room_id)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(limit)
+        )
+        messages = list(reversed(db.scalars(query).all()))
 
     results: list[RoomMessageResponse] = []
     for message in messages:

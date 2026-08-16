@@ -258,9 +258,16 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
         message.version += 1
 
         room_sequence = (db.scalar(select(func.max(RoomEvent.room_sequence)).where(RoomEvent.room_id == room_id)) or 0) + 1
+        occurred_at = datetime.now(timezone.utc)
+        event_id = f"evt_{uuid4().hex[:24]}"
         event_payload = {
+            "event_id": event_id,
+            "event_type": "MessageUpdated",
+            "event_version": 1,
+            "occurred_at": occurred_at.isoformat(),
             "type": "MessageUpdated",
             "room_id": room_id,
+            "room_sequence": room_sequence,
             "message_id": message.id,
             "version": message.version,
             "original_message": {
@@ -292,10 +299,10 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
         room_event = RoomEvent(
             room_id=room_id,
             room_sequence=room_sequence,
-            event_id=f"evt_{uuid4().hex[:24]}",
+            event_id=event_id,
             event_type="MessageUpdated",
             payload=event_payload,
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=occurred_at,
         )
         outbox_event = OutboxEvent(
             aggregate_type="message",
@@ -303,7 +310,7 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
             event_type="MessageUpdated",
             payload=event_payload,
             status="pending",
-            created_at=datetime.now(timezone.utc),
+            created_at=occurred_at,
         )
 
         db.add(room_event)

@@ -45,41 +45,23 @@ def test_build_translation_provider_rejects_unknown_provider() -> None:
 
 
 def test_run_translation_task_sends_failed_job_to_dead_letter_queue() -> None:
-    with patch("services.worker.app.tasks.translation.build_translation_provider", side_effect=TimeoutError("provider timeout")):
+    with patch("services.worker.app.tasks.translation._run_translation_task", side_effect=TimeoutError("provider timeout")):
         with patch("services.worker.app.tasks.translation.celery_app.send_task") as send_task_mock:
-            with patch("services.worker.app.tasks.translation.SessionLocal") as session_local_mock:
-                message = MagicMock()
-                message.created_at = datetime.now(timezone.utc)
-                message.status = "original_only"
-                message.version = 1
+            result = run_translation_task("msg_1", "room_1", "pl", "Czesc")
 
-                room = MagicMock()
-                room.default_translation_mode = "balanced"
-
-                db = MagicMock()
-                db.scalar.side_effect = [message, room]
-                member = MagicMock()
-                member.preferred_lang = "de"
-                db.scalars.return_value.all.return_value = [member]
-
-                session_local_mock.return_value.__enter__.return_value = db
-                session_local_mock.return_value.__exit__.return_value = False
-
-                result = run_translation_task("msg_1", "room_1", "pl", "Czesc")
-
-                assert result["status"] == "dead_letter"
-                send_task_mock.assert_called_once_with(
-                    "services.worker.app.tasks.translation.dead_letter_translation",
-                    kwargs={
-                        "message_id": "msg_1",
-                        "room_id": "room_1",
-                        "source_lang": "pl",
-                        "content_original": "Czesc",
-                        "error_type": "TimeoutError",
-                        "error_message": "provider timeout",
-                    },
-                    queue="translation.failed.q",
-                )
+            assert result["status"] == "dead_letter"
+            send_task_mock.assert_called_once_with(
+                "services.worker.app.tasks.translation.dead_letter_translation",
+                kwargs={
+                    "message_id": "msg_1",
+                    "room_id": "room_1",
+                    "source_lang": "pl",
+                    "content_original": "Czesc",
+                    "error_type": "TimeoutError",
+                    "error_message": "provider timeout",
+                },
+                queue="translation.failed.q",
+            )
 
 
 def test_build_translation_provider_uses_configured_fallback() -> None:
@@ -136,16 +118,19 @@ def test_translate_message_handles_no_target_languages(session_local_mock: Magic
 
 
 @patch("services.worker.app.tasks.translation.manager.broadcast", new_callable=AsyncMock)
+@patch("services.worker.app.tasks.translation.redis_client")
 @patch("services.worker.app.tasks.translation.build_translation_provider")
 @patch("services.worker.app.tasks.translation.SessionLocal")
 def test_translate_message_uses_provider_and_broadcasts_update(
     session_local_mock: MagicMock,
     provider_factory_mock: MagicMock,
+    redis_client_mock: MagicMock,
     broadcast_mock: AsyncMock,
 ) -> None:
     provider = MagicMock()
     provider.translate.return_value = ("Hallo", 12, 7)
     provider_factory_mock.return_value = provider
+    redis_client_mock.get.return_value = None
 
     message = MagicMock()
     message.id = "msg_1"
@@ -161,13 +146,23 @@ def test_translate_message_uses_provider_and_broadcasts_update(
     room.default_translation_mode = "balanced"
 
     db = MagicMock()
-    db.scalar.side_effect = [message, room]
+    db.scalar.side_effect = [message, room, None, 1]
 
     member = MagicMock()
     member.preferred_lang = "de"
-    scalars_result = MagicMock()
-    scalars_result.all.return_value = [member]
-    db.scalars.return_value = scalars_result
+    members_result = MagicMock()
+    members_result.all.return_value = [member]
+    translations_result = MagicMock()
+    translations_result.all.return_value = [
+        MagicMock(
+            target_lang="de",
+            content="Hallo",
+            provider="openai",
+            quality_mode="balanced",
+            translated_at=datetime.now(timezone.utc),
+        )
+    ]
+    db.scalars.side_effect = [members_result, translations_result]
 
     session_local_mock.return_value.__enter__.return_value = db
     session_local_mock.return_value.__exit__.return_value = False
@@ -175,6 +170,20 @@ def test_translate_message_uses_provider_and_broadcasts_update(
     result = translate_message("msg_1", "room_1", "pl", "Czesc")
 
     provider_factory_mock.assert_called_once()
-    provider.translate.assert_called_once_with("Czesc", "pl", "de")
+    provider.translate.assert_called_once_with(
+        content_original="Czesc",
+        source_lang="pl",
+        target_lang="de",
+    )
     assert result["status"] == "translated"
     broadcast_mock.assert_awaited_once()
+    broadcast_room_id, event = broadcast_mock.await_args.args
+    assert broadcast_room_id == "room_1"
+    assert event["type"] == "MessageUpdated"
+    assert event["event_type"] == "MessageUpdated"
+    assert event["event_version"] == 1
+    assert event["event_id"].startswith("evt_")
+    assert event["room_sequence"] == 2
+    assert event["occurred_at"]
+    assert event["message_id"] == "msg_1"
+    assert event["translations"]["de"]["content"] == "Hallo"
