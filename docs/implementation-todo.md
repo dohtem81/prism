@@ -40,14 +40,14 @@ Tracks current task status and next actions.
 | P1-12 | Milestone 6 | Observability | Add structured logging and correlation ids | TODO | Medium | 2026-08-11 | Needed across api + worker + outbox publisher. |
 | P1-13 | Milestone 6 | Observability | Add basic metrics for queue delay and translation latency | TODO | Medium | 2026-08-11 | Start with counters/histograms and dashboard stub. |
 | P1-14 | Milestone 3 / 4 | Testing | Add integration test: send message -> queued -> translated | DONE | High | 2026-08-11 | A full send-message-to-translation-update flow test is included in the unit regression suite. |
-| P1-15 | Milestone 6 | Security | Validate input limits and enforce payload size checks | TODO | Medium | 2026-08-11 | Prevent abuse and oversized requests. |
+| P1-15 | Milestone 6 | Security | Validate input limits and enforce payload size checks | DONE | Medium | 2026-08-16 | `SendMessage` now enforces source language format and payload size bounds (including 4000-char content limit); rate limiting and quotas remain follow-on hardening. |
 | P1-18 | Milestone 5 | History | Build room history API and reconnect replay | DONE | Medium | 2026-08-11 | The room history endpoint and reconnect-safe replay logic are implemented and validated in the live room flow. |
 
 ---
 
 ## Next up
 
-1. Production hardening — structured logs, correlation IDs, and input validation (P1-12, P1-13, P1-15).
+1. Production hardening — structured logs and correlation IDs (P1-12), plus queue/translation metrics (P1-13).
 2. Analytics layer — room admin metrics and cost visibility (P1-11).
 3. Multi-instance fanout — Redis pub/sub across API replicas.
 4. Dev tooling — seed/bootstrap script for quick local QA (P1-10).
@@ -64,3 +64,4 @@ Tracks current task status and next actions.
 | 2026-08-11 | Milestones 4 and 5 verified — translation provider abstraction, DLQ, history replay, and full test suite passing |
 | 2026-08-12 | `.env` removed from repository history; documentation refreshed |
 | 2026-08-12 | Docs rewritten for clarity; Mermaid diagrams added to README and data-flow doc |
+| 2026-08-16 | WebSocket auth hardened to token-derived identity, realtime event envelope fields aligned with contract, history anchor validation tightened, and payload input limits enforced |

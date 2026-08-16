@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
@@ -105,3 +106,25 @@ def test_send_message_idempotent_duplicate_does_not_reenqueue(celery_client_mock
     assert response.message_id == "msg_existing"
     assert db.rollback.called
     celery_client_mock.send_task.assert_not_called()
+
+
+def test_send_message_schema_rejects_invalid_source_language() -> None:
+    with pytest.raises(ValidationError):
+        SendMessage(
+            author_user_id="user_1",
+            room_id="room_1",
+            client_message_id="cmsg_1",
+            source_lang="pol",
+            content_original="Czesc",
+        )
+
+
+def test_send_message_schema_rejects_oversized_content() -> None:
+    with pytest.raises(ValidationError):
+        SendMessage(
+            author_user_id="user_1",
+            room_id="room_1",
+            client_message_id="cmsg_1",
+            source_lang="pl",
+            content_original="x" * 4001,
+        )

@@ -2,12 +2,11 @@ from collections import defaultdict
 from typing import DefaultDict
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from services.api.app.auth.dependencies import resolve_authenticated_user_id
 from services.api.app.infra.db import get_db
-from services.api.app.infra.settings import settings
 from shared.db.models import Room, RoomMember
 
 router = APIRouter(tags=["realtime"])
@@ -48,21 +47,13 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-def _resolve_user_id(token: str | None, user_id: str | None) -> str:
-    if user_id:
-        return user_id
-    if token == "dev-token":
-        return "dev-user"
+def _resolve_user_id(token: str | None) -> str:
     if not token:
         raise ValueError("Missing token")
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-    except JWTError as exc:
+        return resolve_authenticated_user_id(token)
+    except Exception as exc:
         raise ValueError("Invalid token") from exc
-    subject = payload.get("sub")
-    if not subject:
-        raise ValueError("Invalid token")
-    return str(subject)
 
 
 @router.websocket("/ws/{room_id}")
@@ -70,11 +61,10 @@ async def websocket_gateway(
     websocket: WebSocket,
     room_id: str,
     token: str | None = Query(default=None),
-    user_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> None:
     try:
-        resolved_user_id = _resolve_user_id(token, user_id)
+        resolved_user_id = _resolve_user_id(token)
     except ValueError:
         await websocket.close(code=1008)
         return

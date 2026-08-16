@@ -17,9 +17,24 @@ def create_access_token(subject: str) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
 
 
+def resolve_authenticated_user_id(token: str) -> str:
+    if token == "dev-token":
+        return "dev-user"
+
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
+    except JWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+    subject = payload.get("sub")
+    if not subject:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    return str(subject)
+
+
 def get_current_user_id(
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
-    user_id: Annotated[str | None, Query(alias="user_id")] = None,
     token: Annotated[str | None, Query()] = None,
     db: Session = Depends(get_db),
 ) -> str:
@@ -33,18 +48,4 @@ def get_current_user_id(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Authorization header")
         resolved_token = bearer_token
 
-    if resolved_token == "dev-token":
-        if user_id:
-            return user_id
-        return "dev-user"
-
-    try:
-        payload = jwt.decode(resolved_token, settings.jwt_secret, algorithms=[ALGORITHM])
-    except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-
-    subject = payload.get("sub")
-    if not subject:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-    return str(subject)
+    return resolve_authenticated_user_id(resolved_token)

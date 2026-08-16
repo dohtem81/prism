@@ -53,6 +53,7 @@ def send_message(
     created_at = datetime.now(timezone.utc)
     should_enqueue_translation = True
     room_sequence = (db.scalar(select(func.max(RoomEvent.room_sequence)).where(RoomEvent.room_id == payload.room_id)) or 0) + 1
+    event_id = f"evt_{uuid4().hex[:24]}"
 
     message = Message(
         id=message_id,
@@ -67,8 +68,13 @@ def send_message(
     )
 
     message_created_payload = {
+        "event_id": event_id,
+        "event_type": "MessageCreated",
+        "event_version": 1,
+        "occurred_at": created_at.isoformat(),
         "type": "MessageCreated",
         "room_id": payload.room_id,
+        "room_sequence": room_sequence,
         "message": {
             "message_id": message.id,
             "version": message.version,
@@ -84,7 +90,7 @@ def send_message(
     room_event = RoomEvent(
         room_id=payload.room_id,
         room_sequence=room_sequence,
-        event_id=f"evt_{uuid4().hex[:24]}",
+        event_id=event_id,
         event_type="MessageCreated",
         payload=message_created_payload,
         occurred_at=created_at,

@@ -90,6 +90,12 @@ Validation:
 
 ```json
 {
+  "event_id": "evt_01J9...",
+  "event_type": "MessageCreated",
+  "event_version": 1,
+  "occurred_at": "2026-08-05T12:00:01Z",
+  "room_id": "room_123",
+  "room_sequence": 481,
   "type": "MessageCreated",
   "message": {
     "message_id": "msg_1001",
@@ -108,6 +114,12 @@ Validation:
 
 ```json
 {
+  "event_id": "evt_01JA...",
+  "event_type": "MessageUpdated",
+  "event_version": 1,
+  "occurred_at": "2026-08-05T12:00:02Z",
+  "room_id": "room_123",
+  "room_sequence": 482,
   "type": "MessageUpdated",
   "message_id": "msg_1001",
   "version": 2,
@@ -166,9 +178,14 @@ Request:
 
 ### History
 
-GET /v1/rooms/{room_id}/messages?cursor=...&limit=50
+GET /v1/rooms/{room_id}/messages?since_message_id=...&limit=50
 
 Response includes original + known translations + versions.
+
+Rules:
+
+- If `since_message_id` is omitted, the API returns the recent window (`limit`) and orders results oldest-to-newest within that window.
+- If `since_message_id` is provided, it must belong to the same room, otherwise the API returns 404.
 
 ## Queue Contract: TranslationRequested
 

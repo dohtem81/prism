@@ -26,7 +26,7 @@ Verification evidence:
 
 ## Milestone 2: Room and Auth APIs
 
-Status: **IN_PROGRESS / PARTIALLY COMPLETE** (verified 2026-08-09)
+Status: **DONE** (verified 2026-08-09)
 
 Deliverables:
 

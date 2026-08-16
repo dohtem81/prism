@@ -176,7 +176,7 @@ pytest -q tests/unit
 - Redis pub/sub fan-out across multiple API replicas (currently single-instance only)
 - Admin analytics and room metrics dashboards (telemetry schema is in place, aggregation and API are not)
 - Structured observability — correlation IDs, request tracing across API and worker
-- Production hardening — payload size limits, rate limiting, quota enforcement
+- Production hardening — rate limiting and quota enforcement
 - Seed / dev bootstrap script for quick local QA setup
 
 ---
