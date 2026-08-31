@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.infra.db import get_db
+from services.api.app.infra.rate_limit import rate_limiter
+from services.api.app.infra.settings import settings
 from shared.db.models import Message, MessageTranslation, Room, RoomMember
 from shared.schemas.rooms import (
     CreateRoomRequest,
@@ -34,6 +36,13 @@ def create_room(
     db: Session = Depends(get_db),
     current_user_id: str = Depends(get_current_user_id),
 ) -> CreateRoomResponse:
+    rate_limiter.enforce(
+        f"rl:user:{current_user_id}:rooms_create",
+        settings.rate_limit_room_creation_per_user_per_hour,
+        3600,
+        scope="room_creation_per_user",
+    )
+
     room_id = f"room_{uuid4().hex[:24]}"
     room = Room(
         id=room_id,
@@ -98,6 +107,13 @@ def upsert_membership(
     current_user_id: str = Depends(get_current_user_id),
 ) -> RoomMembershipResponse:
     room = db.get(Room, room_id)
+    rate_limiter.enforce(
+        f"rl:user:{current_user_id}:room_members",
+        settings.rate_limit_room_membership_per_admin_per_minute,
+        60,
+        scope="room_membership_per_admin",
+    )
+
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
 

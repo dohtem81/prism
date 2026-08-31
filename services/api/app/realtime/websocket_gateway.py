@@ -21,14 +21,25 @@ router = APIRouter(tags=["realtime"])
 class ConnectionManager:
     def __init__(self) -> None:
         self._connections: DefaultDict[str, set[WebSocket]] = defaultdict(set)
+        self._user_connections: DefaultDict[str, set[WebSocket]] = defaultdict(set)
         self._redis_listeners: set[str] = set()
         self._redis_listener_tasks: set[asyncio.Task[None]] = set()
 
-    async def connect(self, websocket: WebSocket, room_id: str) -> None:
+    def active_connection_count(self, user_id: str) -> int:
+        return len(self._user_connections.get(user_id, set()))
+
+    async def connect(self, websocket: WebSocket, room_id: str, user_id: str | None = None) -> None:
         await websocket.accept()
         self._connections[room_id].add(websocket)
+        if user_id is not None:
+            self._user_connections[user_id].add(websocket)
 
-    def disconnect(self, websocket: WebSocket, room_id: str | None = None) -> None:
+    def disconnect(self, websocket: WebSocket, room_id: str | None = None, user_id: str | None = None) -> None:
+        if user_id is not None:
+            self._user_connections[user_id].discard(websocket)
+            if not self._user_connections[user_id]:
+                del self._user_connections[user_id]
+
         if room_id is not None:
             self._connections[room_id].discard(websocket)
             if not self._connections[room_id]:
@@ -87,6 +98,7 @@ class ConnectionManager:
 
     def clear(self) -> None:
         self._connections.clear()
+        self._user_connections.clear()
         self._redis_listeners.clear()
         for task in list(self._redis_listener_tasks):
             task.cancel()
@@ -133,12 +145,16 @@ async def websocket_gateway(
         await websocket.close(code=1008)
         return
 
-    await manager.connect(websocket, room_id)
+    if manager.active_connection_count(resolved_user_id) >= settings.rate_limit_ws_connections_per_user:
+        await websocket.close(code=1013)
+        return
+
+    await manager.connect(websocket, room_id, resolved_user_id)
     await manager.ensure_redis_listener(room_id)
 
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket, room_id)
+        manager.disconnect(websocket, room_id, resolved_user_id)
         return

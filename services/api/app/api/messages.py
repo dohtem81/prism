@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.infra.celery_client import celery_client
 from services.api.app.infra.db import get_db
+from services.api.app.infra.rate_limit import rate_limiter
+from services.api.app.infra.settings import settings
 from services.api.app.realtime.websocket_gateway import manager
 from shared.db.models import Message, OutboxEvent, Room, RoomEvent, RoomMember
 from shared.schemas.message_events import SendMessage, SendMessageResponse
@@ -40,6 +42,19 @@ def send_message(
     )
     if not membership:
         raise HTTPException(status_code=403, detail="User is not a room member")
+
+    rate_limiter.enforce(
+        f"rl:user:{current_user_id}:messages",
+        settings.rate_limit_messages_per_user_per_minute,
+        60,
+        scope="messages_per_user",
+    )
+    rate_limiter.enforce(
+        f"rl:room:{payload.room_id}:messages",
+        settings.rate_limit_messages_per_room_per_minute,
+        60,
+        scope="messages_per_room",
+    )
 
     message_id = f"msg_{uuid4().hex[:24]}"
     created_at = datetime.now(timezone.utc)

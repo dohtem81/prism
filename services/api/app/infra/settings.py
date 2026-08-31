@@ -19,5 +19,12 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     jwt_secret: str = "dev-secret"
 
+    rate_limit_enabled: bool = True
+    rate_limit_messages_per_user_per_minute: int = 30
+    rate_limit_messages_per_room_per_minute: int = 120
+    rate_limit_room_creation_per_user_per_hour: int = 10
+    rate_limit_room_membership_per_admin_per_minute: int = 20
+    rate_limit_ws_connections_per_user: int = 3
+
 
 settings = Settings()
