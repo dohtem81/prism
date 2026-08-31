@@ -42,6 +42,12 @@ Tracks current task status and next actions.
 | P1-14 | Milestone 3 / 4 | Testing | Add integration test: send message -> queued -> translated | DONE | High | 2026-08-11 | A full send-message-to-translation-update flow test is included in the unit regression suite. |
 | P1-15 | Milestone 6 | Security | Validate input limits and enforce payload size checks | DONE | Medium | 2026-08-16 | `SendMessage` now enforces source language format and payload size bounds (including 4000-char content limit); rate limiting and quotas remain follow-on hardening. |
 | P1-18 | Milestone 5 | History | Build room history API and reconnect replay | DONE | Medium | 2026-08-11 | The room history endpoint and reconnect-safe replay logic are implemented and validated in the live room flow. |
+| P1-19 | Cross-cutting | Architecture | Keep the system single-instance only for now; plan Redis pub/sub multi-replica fanout as a future milestone | TODO | High | 2026-08-30 | Current design is intentionally single-instance for demo/testing simplicity. See docs/single-instance-scaling-deferred-plan.md. |
+| P1-20 | Cross-cutting | Security | Add rate limiting, quotas, and abuse protections for message send volume and API usage | TODO | Medium | 2026-08-30 | No rate limiting or quotas are active yet. See docs/rate-limiting-and-quotas-plan.md. |
+| P1-21 | Milestone 6 | Observability | Add full request tracing and end-to-end distributed tracing beyond basic correlation IDs | TODO | Medium | 2026-08-30 | Current observability is limited to structured logs and basic metrics; no full tracing stack is implemented. See docs/distributed-tracing-plan.md. |
+| P1-22 | Cross-cutting | Operations | Capture load, latency, and performance baselines under realistic traffic | TODO | Medium | 2026-08-30 | No benchmark or load/performance dataset exists yet. See docs/performance-baselines-plan.md. |
+| P1-23 | Cross-cutting | Security | Add real multi-tenancy boundaries and stronger isolation controls | TODO | Medium | 2026-08-30 | There is no tenant model or hardened multi-tenant isolation beyond basic JWT auth. See docs/multi-tenancy-hardening-plan.md. |
+| P1-24 | Cross-cutting | Security | Harden auth and API security beyond basic JWT validation | TODO | Medium | 2026-08-30 | Current security posture is intentionally limited to JWT-based user identity with no broader hardening pass. See docs/auth-security-hardening-plan.md. |
 
 ---
 
@@ -49,8 +55,11 @@ Tracks current task status and next actions.
 
 1. Production hardening — structured logs and correlation IDs (P1-12), plus queue/translation metrics (P1-13).
 2. Analytics layer — room admin metrics and cost visibility (P1-11).
-3. Multi-instance fanout — Redis pub/sub across API replicas.
+3. Multi-instance fanout — Redis pub/sub across API replicas (P1-19).
 4. Dev tooling — seed/bootstrap script for quick local QA (P1-10).
+5. Deferred hardening — rate limiting, tracing, load/perf data, multi-tenancy, and security hardening (P1-20 to P1-24).
+
+> P1-20 is planned in detail in docs/rate-limiting-and-quotas-plan.md. The remaining deferred hardening items are also documented in docs/distributed-tracing-plan.md, docs/performance-baselines-plan.md, docs/multi-tenancy-hardening-plan.md, and docs/auth-security-hardening-plan.md.
 
 ---
 
@@ -65,3 +74,4 @@ Tracks current task status and next actions.
 | 2026-08-12 | `.env` removed from repository history; documentation refreshed |
 | 2026-08-12 | Docs rewritten for clarity; Mermaid diagrams added to README and data-flow doc |
 | 2026-08-16 | WebSocket auth hardened to token-derived identity, realtime event envelope fields aligned with contract, history anchor validation tightened, and payload input limits enforced |
+| 2026-08-30 | Added deferred architecture and hardening TODOs for single-instance status, no rate limiting/quotas, limited observability, missing performance data, and basic JWT-only security posture; also linked the explicit scaling-deferral plan for the single-instance choice |

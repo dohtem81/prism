@@ -4,12 +4,13 @@
 Allow realtime room events to fan out correctly when multiple API instances are running behind a load balancer.
 
 ## Current state
-- The current WebSocket gateway is in-memory and single-instance only.
+- The current WebSocket gateway is in-memory and intentionally single-instance.
 - Redis is already available in the stack for this purpose.
-- Multi-instance fanout is explicitly called out as a near-term follow-on item.
+- Multi-instance fanout is consciously deferred for now because the project is deliberately kept simple for local validation and demo use.
+- This is a known future scaling path, not an active blocker for the current milestone.
 
 ## Problem to solve
-Each API instance currently tracks its own socket set. A room message produced by one instance will not reach sockets connected to another instance.
+Each API instance currently tracks its own socket set. A room message produced by one instance will not reach sockets connected to another instance, which matters only once the system is intentionally scaled beyond the current single-instance design.
 
 ## Proposed architecture
 1. Use Redis pub/sub for room-level event channels.
@@ -31,10 +32,10 @@ Each API instance currently tracks its own socket set. A room message produced b
 - Ensure a message is published only after persistence succeeds.
 
 ## Acceptance criteria
-- Multiple API replicas can deliver events to the same room.
+- Multiple API replicas can deliver events to the same room when the design is intentionally scaled.
 - A message sent from one instance is visible on sockets connected to another instance.
 - Fanout remains room-scoped and does not leak across rooms.
-- Local in-memory broadcast remains as a fallback for single-instance environments.
+- Local in-memory broadcast remains as the current simple fallback for single-instance environments and demos.
 
 ## Relevant code
 - services/api/app/realtime/websocket_gateway.py
