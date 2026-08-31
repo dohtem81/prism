@@ -169,15 +169,22 @@ pytest -q tests/unit
 - Message send, persistence, and WebSocket fan-out to all room subscribers
 - Async translation via configurable LLM provider with live `MessageUpdated` push
 - Graceful degradation — provider failures mark the message `translation_unavailable` and push a status update without breaking chat
+- Retry policy with dead-letter queue handling for permanently failed translation jobs
 - Reconnect-safe room history replay
+- Room admin metrics and analytics summary endpoint (queue delay, translation latency, cost breakdowns)
+- Structured logging with request correlation IDs across API and worker
+- Lightweight distributed tracing — trace/span context propagated from HTTP requests through Celery into the worker, instrumenting message, room, websocket, and admin request paths plus translation job execution
+- Rate limiting, daily quotas, and abuse protection (per-user/per-room message limits, room creation limits, websocket connection caps) with an admin violation-visibility endpoint
+- Input validation and payload size limits
+- Seed / dev bootstrap script for quick local QA setup
 - Docker-first local dev with Postgres, RabbitMQ, Redis, API, and worker
 
 **Planned / not yet built:**
 - Redis pub/sub fan-out across multiple API replicas (currently single-instance only)
-- Admin analytics and room metrics dashboards (telemetry schema is in place, aggregation and API are not)
-- Structured observability — correlation IDs, request tracing across API and worker
-- Production hardening — rate limiting and quota enforcement
-- Seed / dev bootstrap script for quick local QA setup
+- Load, latency, and performance baselines under realistic traffic
+- Stronger multi-tenancy boundaries and tenant isolation controls
+- Broader auth/API security hardening beyond JWT (token rotation, session revocation, CSRF/CORS hardening)
+- A tracing exporter/storage backend (OTLP or similar) — spans are currently structured log events only, with no external collector or visualization
 
 ---
 
