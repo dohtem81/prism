@@ -72,48 +72,46 @@ When a limit is hit, log it with user/room context and correlation ID so it is t
 
 ## Implementation phases
 
-### Phase 1: hardcoded defaults for local safety
-Add rate limiting behind config defaults:
-- low per-user burst limit for message creation
-- low per-IP threshold for API endpoints
-- room-level per-minute guardrails
+### Phase 1: hardcoded defaults for local safety — DONE
+Configurable defaults live in `services/api/app/infra/settings.py` for per-user/per-room
+message bursts, room creation, room-membership admin actions, and websocket connections.
 
-This is enough to protect the demo environment while staying simple.
+### Phase 2: Redis-backed enforcement — DONE
+Implemented as a shared helper: `services/api/app/infra/rate_limit.py`
+- `RateLimiter.check(key, limit, window_seconds)` — fixed-window Redis INCR + TTL check
+- `RateLimiter.enforce(...)` — raises `429` with `Retry-After`/`X-RateLimit-*` headers and
+  records a violation when a limit is exceeded
+- Fails open (allows the request, logs a warning) if Redis is unreachable.
 
-### Phase 2: Redis-backed enforcement
-Move the logic behind a shared helper in the API layer:
-- `services/api/app/infra/rate_limit.py`
-- `check_rate_limit(key, limit, window_seconds)`
-- `record_rate_limit_hit(...)`
+### Phase 3: quota enforcement — DONE
+Daily quotas (86400s window) are enforced through the same `RateLimiter.enforce` helper:
+- per-user message budget (`rate_limit_messages_per_user_per_day`)
+- per-room message budget (`rate_limit_messages_per_room_per_day`)
+- per-user translation job budget (`rate_limit_translation_jobs_per_user_per_day`)
 
-### Phase 3: quota enforcement
-Add user and room quotas for stronger protection:
-- per-user message budget
-- per-room message budget
-- translation-cost budget if the platform expands externally
-
-### Phase 4: admin visibility
-Expose quota and violation metrics through the admin API, including:
-- top offenders,
-- rate-limited requests by endpoint,
-- room-level abuse counts.
+### Phase 4: admin visibility — DONE
+`RateLimiter.record_violation` tracks violation counts in Redis hashes
+(`rl:violations:by_user`, `rl:violations:by_room`, `rl:violations:by_scope`).
+`GET /v1/admin/rate-limits/violations` exposes top offenders, top rooms, and violations
+by scope via `RateLimiter.get_violation_summary`.
 
 ## Proposed default policy
 These are starting values, not final production numbers:
-- messages per user per minute: 30
-- messages per room per minute: 120
+- messages per user per minute: 30 (daily quota: 2000)
+- messages per room per minute: 120 (daily quota: 5000)
+- translation jobs per user per day: 2000
 - room creation per user per hour: 10
+- room membership admin actions per minute: 20
 - active websocket connections per user: 3
-- burst allowance: small multiplier above steady-state rate
 
 These should be tuned after real traffic data is available.
 
 ## Acceptance criteria
-- API requests are throttled before expensive translation work is enqueued.
-- A user who exceeds the configured limit gets a clear `429` response.
-- The rate limit state is stored in Redis and is cheap to check.
-- Rate-limit hits are logged with correlating request metadata.
-- Room and user quotas can be tuned via config without changing app logic.
+- API requests are throttled before expensive translation work is enqueued. ✅
+- A user who exceeds the configured limit gets a clear `429` response. ✅
+- The rate limit state is stored in Redis and is cheap to check. ✅
+- Rate-limit hits are logged with correlating request metadata. ✅
+- Room and user quotas can be tuned via config without changing app logic. ✅
 
 ## Relevant files
 - services/api/app/api/messages.py

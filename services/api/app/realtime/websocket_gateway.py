@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from services.api.app.auth.dependencies import resolve_authenticated_user_id
 from services.api.app.infra.db import get_db
+from services.api.app.infra.rate_limit import rate_limiter
 from services.api.app.infra.settings import settings
 from shared.db.models import Room, RoomMember
 
@@ -146,6 +147,7 @@ async def websocket_gateway(
         return
 
     if manager.active_connection_count(resolved_user_id) >= settings.rate_limit_ws_connections_per_user:
+        rate_limiter.record_violation(scope="ws_connections_per_user", user_id=resolved_user_id, room_id=room_id)
         await websocket.close(code=1013)
         return
 

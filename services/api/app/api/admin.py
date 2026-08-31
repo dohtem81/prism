@@ -7,9 +7,18 @@ from sqlalchemy.orm import Session
 from services.api.app.analytics.metrics import build_room_metrics_summary
 from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.infra.db import get_db
+from services.api.app.infra.rate_limit import rate_limiter
 from shared.db.models import Room, RoomMember, TranslationTelemetry
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
+
+
+@router.get("/rate-limits/violations")
+def get_rate_limit_violations(
+    top_n: int = Query(default=10, ge=1, le=100),
+    current_user_id: str = Depends(get_current_user_id),
+) -> dict[str, object]:
+    return rate_limiter.get_violation_summary(top_n=top_n)
 
 
 @router.get("/rooms/{room_id}/metrics")

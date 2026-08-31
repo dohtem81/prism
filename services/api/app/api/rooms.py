@@ -41,6 +41,7 @@ def create_room(
         settings.rate_limit_room_creation_per_user_per_hour,
         3600,
         scope="room_creation_per_user",
+        user_id=current_user_id,
     )
 
     room_id = f"room_{uuid4().hex[:24]}"
@@ -107,19 +108,21 @@ def upsert_membership(
     current_user_id: str = Depends(get_current_user_id),
 ) -> RoomMembershipResponse:
     room = db.get(Room, room_id)
-    rate_limiter.enforce(
-        f"rl:user:{current_user_id}:room_members",
-        settings.rate_limit_room_membership_per_admin_per_minute,
-        60,
-        scope="room_membership_per_admin",
-    )
-
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
 
     actor = db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == current_user_id))
     if not actor or actor.role != "admin":
         raise HTTPException(status_code=403, detail="Only room admins can manage members")
+
+    rate_limiter.enforce(
+        f"rl:user:{current_user_id}:room_members",
+        settings.rate_limit_room_membership_per_admin_per_minute,
+        60,
+        scope="room_membership_per_admin",
+        user_id=current_user_id,
+        room_id=room_id,
+    )
 
     membership = db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == payload.user_id))
     if membership is None:

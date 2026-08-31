@@ -51,7 +51,47 @@ class RateLimiter:
         allowed = count <= limit
         return RateLimitDecision(allowed=allowed, limit=limit, remaining=remaining, reset_seconds=ttl)
 
-    def enforce(self, key: str, limit: int, window_seconds: int, *, scope: str) -> RateLimitDecision:
+    def record_violation(self, *, scope: str, user_id: str | None = None, room_id: str | None = None) -> None:
+        try:
+            self._client.hincrby("rl:violations:by_scope", scope, 1)
+            if user_id:
+                self._client.hincrby("rl:violations:by_user", user_id, 1)
+            if room_id:
+                self._client.hincrby("rl:violations:by_room", room_id, 1)
+        except redis.exceptions.RedisError:
+            logger.warning("rate_limit_violation_tracking_unavailable", extra={"rate_limit_scope": scope})
+
+    def get_violation_summary(self, top_n: int = 10) -> dict[str, object]:
+        def _top(counts: dict[str, str]) -> list[dict[str, object]]:
+            parsed = [{"key": key, "count": int(value)} for key, value in counts.items()]
+            parsed.sort(key=lambda item: item["count"], reverse=True)
+            return parsed[:top_n]
+
+        try:
+            by_user = self._client.hgetall("rl:violations:by_user")
+            by_room = self._client.hgetall("rl:violations:by_room")
+            by_scope = self._client.hgetall("rl:violations:by_scope")
+        except redis.exceptions.RedisError:
+            logger.warning("rate_limit_violation_summary_unavailable")
+            return {"available": False, "top_offenders": [], "top_rooms": [], "by_scope": []}
+
+        return {
+            "available": True,
+            "top_offenders": _top(by_user),
+            "top_rooms": _top(by_room),
+            "by_scope": _top(by_scope),
+        }
+
+    def enforce(
+        self,
+        key: str,
+        limit: int,
+        window_seconds: int,
+        *,
+        scope: str,
+        user_id: str | None = None,
+        room_id: str | None = None,
+    ) -> RateLimitDecision:
         decision = self.check(key, limit, window_seconds)
         if not decision.allowed:
             logger.warning(
@@ -62,6 +102,7 @@ class RateLimiter:
                     "correlation_id": get_correlation_id(),
                 },
             )
+            self.record_violation(scope=scope, user_id=user_id, room_id=room_id)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Rate limit exceeded",

@@ -26,5 +26,9 @@ class Settings(BaseSettings):
     rate_limit_room_membership_per_admin_per_minute: int = 20
     rate_limit_ws_connections_per_user: int = 3
 
+    rate_limit_messages_per_user_per_day: int = 2000
+    rate_limit_messages_per_room_per_day: int = 5000
+    rate_limit_translation_jobs_per_user_per_day: int = 2000
+
 
 settings = Settings()

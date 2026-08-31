@@ -48,12 +48,35 @@ def send_message(
         settings.rate_limit_messages_per_user_per_minute,
         60,
         scope="messages_per_user",
+        user_id=current_user_id,
     )
     rate_limiter.enforce(
         f"rl:room:{payload.room_id}:messages",
         settings.rate_limit_messages_per_room_per_minute,
         60,
         scope="messages_per_room",
+        room_id=payload.room_id,
+    )
+    rate_limiter.enforce(
+        f"rl:user:{current_user_id}:messages:daily",
+        settings.rate_limit_messages_per_user_per_day,
+        86400,
+        scope="messages_per_user_daily_quota",
+        user_id=current_user_id,
+    )
+    rate_limiter.enforce(
+        f"rl:room:{payload.room_id}:messages:daily",
+        settings.rate_limit_messages_per_room_per_day,
+        86400,
+        scope="messages_per_room_daily_quota",
+        room_id=payload.room_id,
+    )
+    rate_limiter.enforce(
+        f"rl:user:{current_user_id}:translation_jobs:daily",
+        settings.rate_limit_translation_jobs_per_user_per_day,
+        86400,
+        scope="translation_jobs_per_user_daily_quota",
+        user_id=current_user_id,
     )
 
     message_id = f"msg_{uuid4().hex[:24]}"
