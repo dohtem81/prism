@@ -15,8 +15,8 @@ Tracks current task status and next actions.
 | Milestone 3 — Realtime Messaging and History | DONE |
 | Milestone 4 — Translation Pipeline | DONE |
 | Milestone 5 — History Replay | DONE |
-| Milestone 6 — Observability | TODO |
-| Milestone 7 — Analytics | TODO |
+| Milestone 6 — Observability | DONE |
+| Milestone 7 — Analytics | DONE |
 
 ---
 
@@ -53,13 +53,12 @@ Tracks current task status and next actions.
 
 ## Next up
 
-1. Production hardening — structured logs and correlation IDs (P1-12), plus queue/translation metrics (P1-13).
-2. Analytics layer — room admin metrics and cost visibility (P1-11).
-3. Multi-instance fanout — Redis pub/sub across API replicas (P1-19).
-4. Dev tooling — seed/bootstrap script for quick local QA (P1-10).
-5. Deferred hardening — rate limiting, tracing, load/perf data, multi-tenancy, and security hardening (P1-20 to P1-24).
+1. Multi-instance fanout — Redis pub/sub across API replicas (P1-19).
+2. Performance baselines — capture load and latency data under realistic traffic (P1-22).
+3. Multi-tenancy hardening — real tenant boundaries and stronger isolation (P1-23).
+4. Auth/API security hardening beyond basic JWT validation (P1-24).
 
-> P1-20 is planned in detail in docs/rate-limiting-and-quotas-plan.md. The remaining deferred hardening items are also documented in docs/distributed-tracing-plan.md, docs/performance-baselines-plan.md, docs/multi-tenancy-hardening-plan.md, and docs/auth-security-hardening-plan.md.
+> These are the only remaining TODO items in the tracker; all other milestones and cross-cutting tasks are DONE. P1-19 is planned in docs/single-instance-scaling-deferred-plan.md, P1-22 in docs/performance-baselines-plan.md, P1-23 in docs/multi-tenancy-hardening-plan.md, and P1-24 in docs/auth-security-hardening-plan.md.
 
 ---
 

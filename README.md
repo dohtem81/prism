@@ -122,6 +122,14 @@ Navigate to `http://localhost:8000/ui` — create rooms, add users, send message
 curl http://localhost:8000/v1/health
 ```
 
+**Optional: seed demo data**
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml run --rm api python -m scripts.bootstrap_dev
+```
+
+This creates a demo user, a demo room, and an admin membership so you can start testing immediately instead of creating everything by hand.
+
 ---
 
 ## Docker command reference
@@ -162,6 +170,8 @@ pytest -q tests/unit
 ---
 
 ## Project status
+
+Room/message analytics (`/v1/admin/rooms/{room_id}/metrics`) and basic observability (structured logging, correlation IDs, queue/translation latency metrics, distributed tracing) are implemented and available today — see below.
 
 **Working now:**
 - Room creation and membership management
