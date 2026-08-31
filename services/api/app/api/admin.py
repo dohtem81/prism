@@ -9,6 +9,7 @@ from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
 from shared.db.models import Room, RoomMember, TranslationTelemetry
+from shared.tracing import start_span
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
@@ -41,10 +42,11 @@ def get_room_metrics(
     if membership is None or membership.role != "admin":
         raise HTTPException(status_code=403, detail="Only room admins can view room metrics")
 
-    telemetry_rows = db.scalars(
-        select(TranslationTelemetry).where(
-            TranslationTelemetry.room_id == room_id,
-        )
-    ).all()
+    with start_span("api.admin.metrics.fetch", room_id=room_id, user_id=current_user_id):
+        telemetry_rows = db.scalars(
+            select(TranslationTelemetry).where(
+                TranslationTelemetry.room_id == room_id,
+            )
+        ).all()
 
-    return build_room_metrics_summary(room_id=room_id, telemetry_rows=telemetry_rows, window_hours=window_hours)
+        return build_room_metrics_summary(room_id=room_id, telemetry_rows=telemetry_rows, window_hours=window_hours)

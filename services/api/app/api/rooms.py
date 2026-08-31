@@ -18,6 +18,7 @@ from shared.schemas.rooms import (
     RoomMembershipResponse,
     RoomSummary,
 )
+from shared.tracing import start_span
 
 router = APIRouter(prefix="/v1/rooms", tags=["rooms"])
 
@@ -45,23 +46,24 @@ def create_room(
     )
 
     room_id = f"room_{uuid4().hex[:24]}"
-    room = Room(
-        id=room_id,
-        name=payload.name,
-        default_translation_mode="balanced",
-        created_at=datetime.now(timezone.utc),
-    )
-    membership = RoomMember(
-        room_id=room_id,
-        user_id=current_user_id,
-        role="admin",
-        preferred_lang=payload.preferred_lang,
-        created_at=datetime.now(timezone.utc),
-    )
+    with start_span("api.room.create", user_id=current_user_id):
+        room = Room(
+            id=room_id,
+            name=payload.name,
+            default_translation_mode="balanced",
+            created_at=datetime.now(timezone.utc),
+        )
+        membership = RoomMember(
+            room_id=room_id,
+            user_id=current_user_id,
+            role="admin",
+            preferred_lang=payload.preferred_lang,
+            created_at=datetime.now(timezone.utc),
+        )
 
-    db.add(room)
-    db.add(membership)
-    db.commit()
+        db.add(room)
+        db.add(membership)
+        db.commit()
 
     return CreateRoomResponse(
         room_id=room.id,
@@ -125,20 +127,21 @@ def upsert_membership(
     )
 
     membership = db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == payload.user_id))
-    if membership is None:
-        membership = RoomMember(
-            room_id=room_id,
-            user_id=payload.user_id,
-            role="member",
-            preferred_lang=payload.preferred_lang,
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(membership)
-    else:
-        membership.preferred_lang = payload.preferred_lang
-        membership.role = "member"
+    with start_span("api.room.membership.upsert", room_id=room_id, user_id=current_user_id):
+        if membership is None:
+            membership = RoomMember(
+                room_id=room_id,
+                user_id=payload.user_id,
+                role="member",
+                preferred_lang=payload.preferred_lang,
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(membership)
+        else:
+            membership.preferred_lang = payload.preferred_lang
+            membership.role = "member"
 
-    db.commit()
+        db.commit()
     return RoomMembershipResponse(
         room_id=membership.room_id,
         user_id=membership.user_id,
@@ -169,63 +172,64 @@ def list_room_messages(
     if not membership:
         raise HTTPException(status_code=403, detail="User is not a room member")
 
-    if since_message_id:
-        anchor = db.scalar(
-            select(Message).where(
-                Message.room_id == room_id,
-                Message.id == since_message_id,
+    with start_span("api.room.history.replay", room_id=room_id, user_id=current_user_id):
+        if since_message_id:
+            anchor = db.scalar(
+                select(Message).where(
+                    Message.room_id == room_id,
+                    Message.id == since_message_id,
+                )
             )
-        )
-        if anchor is None:
-            raise HTTPException(status_code=404, detail="Anchor message not found")
+            if anchor is None:
+                raise HTTPException(status_code=404, detail="Anchor message not found")
 
-        query = (
-            select(Message)
-            .where(
-                Message.room_id == room_id,
-                or_(
-                    Message.created_at > anchor.created_at,
-                    and_(Message.created_at == anchor.created_at, Message.id > anchor.id),
-                ),
+            query = (
+                select(Message)
+                .where(
+                    Message.room_id == room_id,
+                    or_(
+                        Message.created_at > anchor.created_at,
+                        and_(Message.created_at == anchor.created_at, Message.id > anchor.id),
+                    ),
+                )
+                .order_by(Message.created_at.asc(), Message.id.asc())
+                .limit(limit)
             )
-            .order_by(Message.created_at.asc(), Message.id.asc())
-            .limit(limit)
-        )
-        messages = db.scalars(query).all()
-    else:
-        query = (
-            select(Message)
-            .where(Message.room_id == room_id)
-            .order_by(Message.created_at.desc(), Message.id.desc())
-            .limit(limit)
-        )
-        messages = list(reversed(db.scalars(query).all()))
+            messages = db.scalars(query).all()
+        else:
+            query = (
+                select(Message)
+                .where(Message.room_id == room_id)
+                .order_by(Message.created_at.desc(), Message.id.desc())
+                .limit(limit)
+            )
+            messages = list(reversed(db.scalars(query).all()))
 
-    results: list[RoomMessageResponse] = []
-    for message in messages:
-        translation_rows = db.scalars(
-            select(MessageTranslation).where(MessageTranslation.message_id == message.id)
-        ).all()
-        translations = {
-            row.target_lang: {
-                "content": row.content,
-                "provider": row.provider,
-                "quality_mode": row.quality_mode,
-                "translated_at": row.translated_at,
+        results: list[RoomMessageResponse] = []
+        for message in messages:
+            translation_rows = db.scalars(
+                select(MessageTranslation).where(MessageTranslation.message_id == message.id)
+            ).all()
+            translations = {
+                row.target_lang: {
+                    "content": row.content,
+                    "provider": row.provider,
+                    "quality_mode": row.quality_mode,
+                    "translated_at": row.translated_at,
+                }
+                for row in translation_rows
             }
-            for row in translation_rows
-        }
-        results.append(
-            RoomMessageResponse(
-                message_id=message.id,
-                version=message.version,
-                author_user_id=message.author_user_id,
-                source_lang=message.source_lang,
-                content_original=message.content_original,
-                status=message.status,
-                created_at=message.created_at,
-                translations=translations,
+            results.append(
+                RoomMessageResponse(
+                    message_id=message.id,
+                    version=message.version,
+                    author_user_id=message.author_user_id,
+                    source_lang=message.source_lang,
+                    content_original=message.content_original,
+                    status=message.status,
+                    created_at=message.created_at,
+                    translations=translations,
+                )
             )
-        )
 
-    return results
+        return results

@@ -87,8 +87,9 @@ from services.worker.app.celery_app import celery_app
 from services.worker.app.infra.settings import settings
 from shared.db.models import Message, MessageTranslation, OutboxEvent, Room, RoomEvent, RoomMember, TranslationTelemetry
 from services.api.app.realtime.websocket_gateway import manager
-from shared.logging_utils import get_correlation_id, get_logger
+from shared.logging_utils import get_correlation_id, get_logger, reset_correlation_id, set_correlation_id
 from shared.metrics import record_translation_metric
+from shared.tracing import reset_trace_context, set_trace_context, start_span
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -127,18 +128,24 @@ def _send_to_dead_letter(
     content_original: str,
     error: Exception,
 ) -> None:
-    celery_app.send_task(
-        "services.worker.app.tasks.translation.dead_letter_translation",
-        kwargs={
-            "message_id": message_id,
-            "room_id": room_id,
-            "source_lang": source_lang,
-            "content_original": content_original,
-            "error_type": type(error).__name__,
-            "error_message": str(error),
-        },
-        queue="translation.failed.q",
-    )
+    with start_span(
+        "worker.translation.dlq_classify",
+        message_id=message_id,
+        room_id=room_id,
+        error_type=type(error).__name__,
+    ):
+        celery_app.send_task(
+            "services.worker.app.tasks.translation.dead_letter_translation",
+            kwargs={
+                "message_id": message_id,
+                "room_id": room_id,
+                "source_lang": source_lang,
+                "content_original": content_original,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            },
+            queue="translation.failed.q",
+        )
 
 
 def run_translation_task(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
@@ -196,22 +203,29 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
             key = _cache_key(content_original, source_lang, target_lang, room.default_translation_mode)
             cached = redis_client.get(key)
 
-            try:
-                if cached:
-                    translated_text = cached
-                    provider_latency_ms = 0
-                else:
-                    provider = build_translation_provider()
-                    translated_text, input_tokens, output_tokens = provider.translate(
-                        content_original=content_original,
-                        source_lang=source_lang,
-                        target_lang=target_lang,
-                    )
-                    redis_client.setex(key, 3600, translated_text)
+            with start_span(
+                "worker.translation.provider_call",
+                message_id=message_id,
+                room_id=room_id,
+                target_lang=target_lang,
+                cached=bool(cached),
+            ):
+                try:
+                    if cached:
+                        translated_text = cached
+                        provider_latency_ms = 0
+                    else:
+                        provider = build_translation_provider()
+                        translated_text, input_tokens, output_tokens = provider.translate(
+                            content_original=content_original,
+                            source_lang=source_lang,
+                            target_lang=target_lang,
+                        )
+                        redis_client.setex(key, 3600, translated_text)
+                        provider_latency_ms = int((time.perf_counter() - provider_start) * 1000)
+                except Exception:
+                    status = "failed"
                     provider_latency_ms = int((time.perf_counter() - provider_start) * 1000)
-            except Exception:
-                status = "failed"
-                provider_latency_ms = int((time.perf_counter() - provider_start) * 1000)
 
             end_to_end_delay_ms = int((datetime.now(timezone.utc) - message.created_at).total_seconds() * 1000)
             record_translation_metric("queue_delay_ms", queue_delay_ms)
@@ -276,67 +290,68 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
 
         message.version += 1
 
-        room_sequence = (db.scalar(select(func.max(RoomEvent.room_sequence)).where(RoomEvent.room_id == room_id)) or 0) + 1
-        occurred_at = datetime.now(timezone.utc)
-        event_id = f"evt_{uuid4().hex[:24]}"
-        event_payload = {
-            "event_id": event_id,
-            "event_type": "MessageUpdated",
-            "event_version": 1,
-            "occurred_at": occurred_at.isoformat(),
-            "type": "MessageUpdated",
-            "room_id": room_id,
-            "room_sequence": room_sequence,
-            "message_id": message.id,
-            "version": message.version,
-            "original_message": {
+        with start_span("worker.translation.dispatch_update", message_id=message_id, room_id=room_id):
+            room_sequence = (db.scalar(select(func.max(RoomEvent.room_sequence)).where(RoomEvent.room_id == room_id)) or 0) + 1
+            occurred_at = datetime.now(timezone.utc)
+            event_id = f"evt_{uuid4().hex[:24]}"
+            event_payload = {
+                "event_id": event_id,
+                "event_type": "MessageUpdated",
+                "event_version": 1,
+                "occurred_at": occurred_at.isoformat(),
+                "type": "MessageUpdated",
+                "room_id": room_id,
+                "room_sequence": room_sequence,
                 "message_id": message.id,
                 "version": message.version,
-                "author_user_id": message.author_user_id,
-                "source_lang": message.source_lang,
-                "content_original": message.content_original,
+                "original_message": {
+                    "message_id": message.id,
+                    "version": message.version,
+                    "author_user_id": message.author_user_id,
+                    "source_lang": message.source_lang,
+                    "content_original": message.content_original,
+                    "status": message.status,
+                    "created_at": message.created_at.isoformat() if message.created_at else None,
+                },
+                "translations": {
+                    target_lang: {
+                        "content": translation.content,
+                        "provider": translation.provider,
+                        "quality_mode": translation.quality_mode,
+                        "translated_at": translation.translated_at.isoformat() if translation.translated_at else None,
+                    }
+                    for target_lang, translation in {
+                        t.target_lang: t for t in db.scalars(
+                            select(MessageTranslation).where(MessageTranslation.message_id == message_id)
+                        ).all()
+                    }.items()
+                },
+                "translations_patch": translations_patch,
                 "status": message.status,
-                "created_at": message.created_at.isoformat() if message.created_at else None,
-            },
-            "translations": {
-                target_lang: {
-                    "content": translation.content,
-                    "provider": translation.provider,
-                    "quality_mode": translation.quality_mode,
-                    "translated_at": translation.translated_at.isoformat() if translation.translated_at else None,
-                }
-                for target_lang, translation in {
-                    t.target_lang: t for t in db.scalars(
-                        select(MessageTranslation).where(MessageTranslation.message_id == message_id)
-                    ).all()
-                }.items()
-            },
-            "translations_patch": translations_patch,
-            "status": message.status,
-        }
+            }
 
-        room_event = RoomEvent(
-            room_id=room_id,
-            room_sequence=room_sequence,
-            event_id=event_id,
-            event_type="MessageUpdated",
-            payload=event_payload,
-            occurred_at=occurred_at,
-        )
-        outbox_event = OutboxEvent(
-            aggregate_type="message",
-            aggregate_id=message.id,
-            event_type="MessageUpdated",
-            payload=event_payload,
-            status="pending",
-            created_at=occurred_at,
-        )
+            room_event = RoomEvent(
+                room_id=room_id,
+                room_sequence=room_sequence,
+                event_id=event_id,
+                event_type="MessageUpdated",
+                payload=event_payload,
+                occurred_at=occurred_at,
+            )
+            outbox_event = OutboxEvent(
+                aggregate_type="message",
+                aggregate_id=message.id,
+                event_type="MessageUpdated",
+                payload=event_payload,
+                status="pending",
+                created_at=occurred_at,
+            )
 
-        db.add(room_event)
-        db.add(outbox_event)
-        db.commit()
+            db.add(room_event)
+            db.add(outbox_event)
+            db.commit()
 
-        manager.publish_room_event(room_id, event_payload)
+            manager.publish_room_event(room_id, event_payload)
         logger.info(
             "translation_batch_completed",
             extra={
@@ -366,8 +381,30 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
     retry_kwargs={"max_retries": 3, "countdown": 5},
     name="services.worker.app.tasks.translation.translate_message",
 )
-def translate_message(self, message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
-    return run_translation_task(message_id, room_id, source_lang, content_original)
+def translate_message(
+    self,
+    message_id: str,
+    room_id: str,
+    source_lang: str,
+    content_original: str,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+) -> dict[str, str]:
+    correlation_token = set_correlation_id(correlation_id) if correlation_id else None
+    trace_tokens = set_trace_context(trace_id) if trace_id else None
+    try:
+        with start_span(
+            "worker.translation.task_receive",
+            message_id=message_id,
+            room_id=room_id,
+            retry_count=self.request.retries,
+        ):
+            return run_translation_task(message_id, room_id, source_lang, content_original)
+    finally:
+        if trace_tokens:
+            reset_trace_context(trace_tokens)
+        if correlation_token:
+            reset_correlation_id(correlation_token)
 
 
 @celery_app.task(name="services.worker.app.tasks.translation.dead_letter_translation")

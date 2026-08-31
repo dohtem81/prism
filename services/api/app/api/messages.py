@@ -16,6 +16,7 @@ from services.api.app.infra.settings import settings
 from services.api.app.realtime.websocket_gateway import manager
 from shared.db.models import Message, OutboxEvent, Room, RoomEvent, RoomMember
 from shared.schemas.message_events import SendMessage, SendMessageResponse
+from shared.tracing import get_trace_id, start_span
 
 router = APIRouter(prefix="/v1/messages", tags=["messages"])
 logger = get_logger("prism.api.messages")
@@ -79,6 +80,11 @@ def send_message(
         user_id=current_user_id,
     )
 
+    with start_span("api.message.create", room_id=payload.room_id, user_id=current_user_id):
+        return _create_message(payload, db, current_user_id)
+
+
+def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> SendMessageResponse:
     message_id = f"msg_{uuid4().hex[:24]}"
     created_at = datetime.now(timezone.utc)
     should_enqueue_translation = True
@@ -166,6 +172,7 @@ def send_message(
                 "source_lang": message.source_lang,
                 "content_original": message.content_original,
                 "correlation_id": get_correlation_id(),
+                "trace_id": get_trace_id(),
             },
             queue="translation.requested.q",
         )

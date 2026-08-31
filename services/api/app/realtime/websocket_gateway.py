@@ -13,6 +13,7 @@ from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
 from services.api.app.infra.settings import settings
 from shared.db.models import Room, RoomMember
+from shared.tracing import start_span
 
 redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, decode_responses=True)
 
@@ -151,8 +152,9 @@ async def websocket_gateway(
         await websocket.close(code=1013)
         return
 
-    await manager.connect(websocket, room_id, resolved_user_id)
-    await manager.ensure_redis_listener(room_id)
+    with start_span("api.ws.connect", room_id=room_id, user_id=resolved_user_id):
+        await manager.connect(websocket, room_id, resolved_user_id)
+        await manager.ensure_redis_listener(room_id)
 
     try:
         while True:

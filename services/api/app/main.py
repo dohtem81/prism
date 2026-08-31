@@ -11,6 +11,7 @@ from services.api.app.infra.settings import settings
 from services.api.app.realtime.websocket_gateway import router as websocket_router
 from services.api.app.ui import router as ui_router
 from shared.logging_utils import get_logger, reset_correlation_id, set_correlation_id
+from shared.tracing import reset_trace_context, set_trace_context
 
 logger = get_logger("prism.api")
 
@@ -20,14 +21,19 @@ app = FastAPI(title=settings.app_name)
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
     correlation_id = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
-    token = set_correlation_id(correlation_id)
+    trace_id = request.headers.get("X-Trace-ID") or correlation_id
+    correlation_token = set_correlation_id(correlation_id)
+    trace_tokens = set_trace_context(trace_id)
     request.state.correlation_id = correlation_id
+    request.state.trace_id = trace_id
     try:
         response = await call_next(request)
         response.headers["X-Correlation-ID"] = correlation_id
+        response.headers["X-Trace-ID"] = trace_id
         return response
     finally:
-        reset_correlation_id(token)
+        reset_correlation_id(correlation_token)
+        reset_trace_context(trace_tokens)
 
 
 @app.middleware("http")
