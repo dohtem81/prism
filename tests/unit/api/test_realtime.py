@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -113,6 +114,22 @@ def test_message_send_and_translation_flow_are_enqueued_and_updated() -> None:
                 assert event["message"]["message_id"] == response.message_id
     finally:
         app.dependency_overrides.clear()
+
+
+def test_room_event_publish_uses_redis_channel_for_multi_instance_fanout() -> None:
+    manager.clear()
+    payload = {
+        "event_id": "evt_123",
+        "event_type": "MessageCreated",
+        "type": "MessageCreated",
+        "room_id": "room_1",
+        "message": {"message_id": "msg_123"},
+    }
+
+    with patch("services.api.app.realtime.websocket_gateway.redis_client.publish") as publish_mock:
+        manager.publish_room_event("room_1", payload)
+
+    publish_mock.assert_called_once_with("room:room_1:events", json.dumps(payload))
 
 
 def test_resolve_user_id_ignores_query_identity_override() -> None:

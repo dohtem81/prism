@@ -87,11 +87,14 @@ from services.worker.app.celery_app import celery_app
 from services.worker.app.infra.settings import settings
 from shared.db.models import Message, MessageTranslation, OutboxEvent, Room, RoomEvent, RoomMember, TranslationTelemetry
 from services.api.app.realtime.websocket_gateway import manager
+from shared.logging_utils import get_correlation_id, get_logger
+from shared.metrics import record_translation_metric
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, decode_responses=True)
+logger = get_logger("prism.worker.translation")
 
 
 def _cache_key(content_original: str, source_lang: str, target_lang: str, mode: str) -> str:
@@ -211,6 +214,22 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
                 provider_latency_ms = int((time.perf_counter() - provider_start) * 1000)
 
             end_to_end_delay_ms = int((datetime.now(timezone.utc) - message.created_at).total_seconds() * 1000)
+            record_translation_metric("queue_delay_ms", queue_delay_ms)
+            record_translation_metric("provider_latency_ms", provider_latency_ms)
+            record_translation_metric("end_to_end_delay_ms", end_to_end_delay_ms)
+            logger.info(
+                "translation_attempt_completed",
+                extra={
+                    "message_id": message_id,
+                    "room_id": room_id,
+                    "target_lang": target_lang,
+                    "status": status,
+                    "queue_delay_ms": queue_delay_ms,
+                    "provider_latency_ms": provider_latency_ms,
+                    "end_to_end_delay_ms": end_to_end_delay_ms,
+                    "correlation_id": get_correlation_id(),
+                },
+            )
             telemetry = TranslationTelemetry(
                 room_id=room_id,
                 message_id=message_id,
@@ -317,7 +336,18 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
         db.add(outbox_event)
         db.commit()
 
-        _broadcast_room_event(room_id, event_payload)
+        manager.publish_room_event(room_id, event_payload)
+        logger.info(
+            "translation_batch_completed",
+            extra={
+                "message_id": message_id,
+                "room_id": room_id,
+                "status": message.status,
+                "successful_translations": success_count,
+                "failed_translations": failure_count,
+                "correlation_id": get_correlation_id(),
+            },
+        )
 
         return {
             "message_id": message_id,

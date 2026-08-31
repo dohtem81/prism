@@ -1,8 +1,9 @@
-import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from shared.logging_utils import get_correlation_id, get_logger
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,16 +16,7 @@ from shared.db.models import Message, OutboxEvent, Room, RoomEvent, RoomMember
 from shared.schemas.message_events import SendMessage, SendMessageResponse
 
 router = APIRouter(prefix="/v1/messages", tags=["messages"])
-
-
-def _broadcast_message_event(room_id: str, payload: dict) -> None:
-    try:
-        running_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.run(manager.broadcast(room_id, payload))
-        return
-
-    running_loop.create_task(manager.broadcast(room_id, payload))
+logger = get_logger("prism.api.messages")
 
 
 @router.post("", response_model=SendMessageResponse)
@@ -135,11 +127,28 @@ def send_message(
                 "room_id": message.room_id,
                 "source_lang": message.source_lang,
                 "content_original": message.content_original,
+                "correlation_id": get_correlation_id(),
             },
             queue="translation.requested.q",
         )
+        logger.info(
+            "message_queued_for_translation",
+            extra={
+                "message_id": message.id,
+                "room_id": message.room_id,
+                "correlation_id": get_correlation_id(),
+            },
+        )
 
-    _broadcast_message_event(message.room_id, message_created_payload)
+    manager.publish_room_event(message.room_id, message_created_payload)
+    logger.info(
+        "message_created",
+        extra={
+            "message_id": message.id,
+            "room_id": message.room_id,
+            "correlation_id": get_correlation_id(),
+        },
+    )
 
     return SendMessageResponse(
         message_id=message.id,

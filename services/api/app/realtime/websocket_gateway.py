@@ -1,13 +1,19 @@
+import asyncio
+import json
 from collections import defaultdict
 from typing import DefaultDict
 
+import redis
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from services.api.app.auth.dependencies import resolve_authenticated_user_id
 from services.api.app.infra.db import get_db
+from services.api.app.infra.settings import settings
 from shared.db.models import Room, RoomMember
+
+redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, decode_responses=True)
 
 router = APIRouter(tags=["realtime"])
 
@@ -15,6 +21,8 @@ router = APIRouter(tags=["realtime"])
 class ConnectionManager:
     def __init__(self) -> None:
         self._connections: DefaultDict[str, set[WebSocket]] = defaultdict(set)
+        self._redis_listeners: set[str] = set()
+        self._redis_listener_tasks: set[asyncio.Task[None]] = set()
 
     async def connect(self, websocket: WebSocket, room_id: str) -> None:
         await websocket.accept()
@@ -32,6 +40,43 @@ class ConnectionManager:
             if not self._connections[current_room_id]:
                 del self._connections[current_room_id]
 
+    async def _handle_redis_message(self, room_id: str, raw_message: str) -> None:
+        try:
+            payload = json.loads(raw_message)
+        except (TypeError, ValueError):
+            return
+
+        await self.broadcast(room_id, payload)
+
+    async def ensure_redis_listener(self, room_id: str) -> None:
+        if room_id in self._redis_listeners:
+            return
+
+        self._redis_listeners.add(room_id)
+
+        async def _listen_for_room_events() -> None:
+            pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
+            channel = f"room:{room_id}:events"
+            pubsub.subscribe(channel)
+            try:
+                while True:
+                    message = pubsub.get_message(timeout=1)
+                    if not message or message.get("type") != "message":
+                        continue
+                    data = message.get("data")
+                    if isinstance(data, str):
+                        await self._handle_redis_message(room_id, data)
+            except Exception:
+                self._redis_listeners.discard(room_id)
+                pubsub.close()
+
+        task = asyncio.create_task(_listen_for_room_events())
+        self._redis_listener_tasks.add(task)
+        task.add_done_callback(self._redis_listener_tasks.discard)
+
+    def publish_room_event(self, room_id: str, payload: dict) -> None:
+        redis_client.publish(f"room:{room_id}:events", json.dumps(payload))
+
     async def broadcast(self, room_id: str, payload: dict) -> None:
         sockets = list(self._connections.get(room_id, set()))
         for websocket in sockets:
@@ -42,6 +87,10 @@ class ConnectionManager:
 
     def clear(self) -> None:
         self._connections.clear()
+        self._redis_listeners.clear()
+        for task in list(self._redis_listener_tasks):
+            task.cancel()
+        self._redis_listener_tasks.clear()
 
 
 manager = ConnectionManager()
@@ -85,6 +134,7 @@ async def websocket_gateway(
         return
 
     await manager.connect(websocket, room_id)
+    await manager.ensure_redis_listener(room_id)
 
     try:
         while True:
