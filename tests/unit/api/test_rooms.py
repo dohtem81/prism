@@ -7,13 +7,14 @@ from fastapi import HTTPException
 from services.api.app.api.rooms import (
     _message_is_after_anchor,
     create_room,
+    join_room,
     list_room_messages,
     list_rooms,
     upsert_membership,
 )
 from services.api.app.auth.dependencies import create_access_token, get_current_user_id
 from shared.db.models import Message, MessageTranslation, Room, RoomMember
-from shared.schemas.rooms import CreateRoomRequest, JoinRoomRequest
+from shared.schemas.rooms import CreateRoomRequest, JoinRoomRequest, JoinRoomSelfRequest
 
 
 def test_get_current_user_id_uses_jwt_sub() -> None:
@@ -76,6 +77,42 @@ def test_upsert_membership_rejects_non_admin() -> None:
         )
 
     assert exc.value.status_code == 403
+
+
+def test_join_room_creates_membership_for_new_member() -> None:
+    db = MagicMock()
+    room = Room(id="room_1", name="Alpha", default_translation_mode="balanced", created_at=datetime.now(timezone.utc))
+    db.get.return_value = room
+    db.scalar.return_value = None
+
+    response = join_room(
+        room_id="room_1",
+        payload=JoinRoomSelfRequest(preferred_lang="de"),
+        db=db,
+        current_user_id="user_2",
+    )
+
+    assert response.room_id == "room_1"
+    assert response.user_id == "user_2"
+    assert response.role == "member"
+    assert response.preferred_lang == "de"
+    assert db.add.call_count == 1
+    db.commit.assert_called_once()
+
+
+def test_join_room_raises_404_when_room_missing() -> None:
+    db = MagicMock()
+    db.get.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+        join_room(
+            room_id="missing",
+            payload=JoinRoomSelfRequest(preferred_lang="en"),
+            db=db,
+            current_user_id="user_2",
+        )
+
+    assert exc.value.status_code == 404
 
 
 def test_list_room_messages_returns_messages_and_translations() -> None:

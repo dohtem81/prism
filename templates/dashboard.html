@@ -137,6 +137,70 @@
         color: var(--muted);
         padding: 18px;
       }
+      .sidebar-section {
+        margin-top: 22px;
+        padding-top: 16px;
+        border-top: 1px solid rgba(148,163,184,0.2);
+      }
+      .sidebar-section h3 {
+        margin: 0 0 10px;
+        font-size: 0.85rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .sidebar-form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .sidebar-form input {
+        background: var(--panel-alt);
+        border: 1px solid rgba(148,163,184,0.25);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 0.9rem;
+      }
+      .sidebar-form button {
+        background: var(--accent-strong);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .form-note {
+        font-size: 0.78rem;
+        color: var(--muted);
+        min-height: 1em;
+      }
+      .stats-panel {
+        margin-bottom: 18px;
+      }
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .stat-card {
+        background: rgba(148,163,184,0.04);
+        border: 1px solid rgba(148,163,184,0.16);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .stat-card .label {
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      .stat-card .value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-top: 4px;
+      }
       @media (max-width: 800px) {
         .app { grid-template-columns: 1fr; }
         .sidebar { border-right: none; border-bottom: 1px solid rgba(148,163,184,0.2); }
@@ -149,6 +213,36 @@
         <h2>Prism</h2>
         <div class="status-pill" id="connectionState">Connecting…</div>
         <ul class="room-list" id="roomList"></ul>
+
+        <div class="sidebar-section">
+          <h3>Create room</h3>
+          <form id="createRoomForm" class="sidebar-form">
+            <input id="createRoomName" type="text" placeholder="Room name" required maxlength="255" />
+            <input id="createRoomLang" type="text" placeholder="Your language (e.g. en)" value="en" required minlength="2" maxlength="8" />
+            <button type="submit">Create</button>
+          </form>
+          <div id="createRoomNote" class="form-note"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <h3>Join room</h3>
+          <form id="joinRoomForm" class="sidebar-form">
+            <input id="joinRoomId" type="text" placeholder="Room ID" required maxlength="64" />
+            <input id="joinRoomLang" type="text" placeholder="Your language (e.g. en)" value="en" required minlength="2" maxlength="8" />
+            <button type="submit">Join</button>
+          </form>
+          <div id="joinRoomNote" class="form-note"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <h3>Settings</h3>
+          <form id="settingsForm" class="sidebar-form">
+            <input id="settingsDisplayName" type="text" placeholder="Display name" maxlength="255" />
+            <input id="settingsPreferredLang" type="text" placeholder="Default language (e.g. en)" required minlength="2" maxlength="8" />
+            <button type="submit">Save</button>
+          </form>
+          <div id="settingsNote" class="form-note"></div>
+        </div>
       </aside>
 
       <main class="content">
@@ -156,6 +250,11 @@
           <h1 id="roomTitle">Dashboard</h1>
           <div class="status-pill" id="roomStatus">Ready</div>
         </div>
+
+        <section class="panel stats-panel" id="statsPanel" style="display: none;">
+          <h3>Room stats (owner view)</h3>
+          <div class="stats-grid" id="statsGrid"></div>
+        </section>
 
         <section class="panel">
           <div class="composer">
@@ -174,6 +273,7 @@
       const activeToken = params.get('token') || 'dev-token';
       const roomId = {{ room_id|tojson if room_id is defined and room_id else "null" }};
       const roomName = {{ room_name|tojson if room_name is defined and room_name else '"Dashboard"' }};
+      const roomRole = {{ room_role|tojson if room_role is defined and room_role else "null" }};
       const wsBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
       const state = {
         rooms: [],
@@ -188,6 +288,14 @@
       const connectionState = document.getElementById('connectionState');
       const messageInput = document.getElementById('messageInput');
       const sendButton = document.getElementById('sendButton');
+      const createRoomForm = document.getElementById('createRoomForm');
+      const createRoomNote = document.getElementById('createRoomNote');
+      const joinRoomForm = document.getElementById('joinRoomForm');
+      const joinRoomNote = document.getElementById('joinRoomNote');
+      const settingsForm = document.getElementById('settingsForm');
+      const settingsNote = document.getElementById('settingsNote');
+      const statsPanel = document.getElementById('statsPanel');
+      const statsGrid = document.getElementById('statsGrid');
 
       function roomQueryString() {
         const search = new URLSearchParams();
@@ -393,6 +501,104 @@
         }
       }
 
+      createRoomForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        createRoomNote.textContent = '';
+        const name = document.getElementById('createRoomName').value.trim();
+        const preferredLang = document.getElementById('createRoomLang').value.trim();
+
+        try {
+          const response = await fetch(`/v1/rooms?${roomQueryString()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            body: JSON.stringify({ name, preferred_lang: preferredLang }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.detail || 'Failed to create room');
+
+          createRoomForm.reset();
+          document.getElementById('createRoomLang').value = 'en';
+          window.location.href = `/ui/rooms/${body.room_id}?${roomQueryString()}`;
+        } catch (error) {
+          createRoomNote.textContent = error.message;
+        }
+      });
+
+      joinRoomForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        joinRoomNote.textContent = '';
+        const targetRoomId = document.getElementById('joinRoomId').value.trim();
+        const preferredLang = document.getElementById('joinRoomLang').value.trim();
+
+        try {
+          const response = await fetch(`/v1/rooms/${encodeURIComponent(targetRoomId)}/join?${roomQueryString()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            body: JSON.stringify({ preferred_lang: preferredLang }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.detail || 'Failed to join room');
+
+          window.location.href = `/ui/rooms/${body.room_id}?${roomQueryString()}`;
+        } catch (error) {
+          joinRoomNote.textContent = error.message;
+        }
+      });
+
+      settingsForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        settingsNote.textContent = '';
+        const displayName = document.getElementById('settingsDisplayName').value.trim();
+        const preferredLang = document.getElementById('settingsPreferredLang').value.trim();
+
+        try {
+          const response = await fetch(`/v1/users?${roomQueryString()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            body: JSON.stringify({ display_name: displayName || null, preferred_lang: preferredLang }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.detail || 'Failed to save settings');
+
+          settingsNote.textContent = 'Saved.';
+        } catch (error) {
+          settingsNote.textContent = error.message;
+        }
+      });
+
+      function renderStats(summary) {
+        statsGrid.innerHTML = '';
+        const entries = [
+          ['Messages', summary.totals?.messages ?? 0],
+          ['Translations', summary.totals?.translations ?? 0],
+          ['Success rate', summary.totals?.success_rate != null ? `${Math.round(summary.totals.success_rate * 100)}%` : '—'],
+          ['Est. cost (USD)', summary.totals?.estimated_cost_usd != null ? `$${summary.totals.estimated_cost_usd.toFixed(2)}` : '—'],
+          ['Queue p95 (ms)', summary.latency_ms?.queue_p95 ?? '—'],
+          ['End-to-end p95 (ms)', summary.latency_ms?.end_to_end_p95 ?? '—'],
+        ];
+        for (const [label, value] of entries) {
+          const card = document.createElement('div');
+          card.className = 'stat-card';
+          card.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div>`;
+          statsGrid.appendChild(card);
+        }
+      }
+
+      async function loadRoomStats() {
+        if (!roomId || roomRole !== 'admin') return;
+        try {
+          const response = await fetch(`/v1/admin/rooms/${roomId}/metrics?${roomQueryString()}`, {
+            headers: { Authorization: `Bearer ${activeToken}` },
+          });
+          if (!response.ok) throw new Error('stats unavailable');
+          const summary = await response.json();
+          statsPanel.style.display = 'block';
+          renderStats(summary);
+        } catch (error) {
+          console.error('Failed to load room stats', error);
+        }
+      }
+
       sendButton.addEventListener('click', sendMessage);
       messageInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -403,6 +609,7 @@
       if (roomId) {
         roomTitle.textContent = roomName || 'Room';
         connectSocket();
+        loadRoomStats();
       } else {
         roomTitle.textContent = 'Dashboard';
       }

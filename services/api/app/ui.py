@@ -7,10 +7,34 @@ from fastapi import Depends
 
 from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.infra.db import get_db
+from services.api.app.infra.settings import settings
 from shared.db.models import Room, RoomMember
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 templates = Jinja2Templates(directory="templates")
+
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "register.html",
+        {
+            "request": request,
+            "title": "Prism · Register",
+            "registration_service_url": settings.registration_service_url,
+        },
+    )
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "title": "Prism · Log in",
+        },
+    )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -46,5 +70,6 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
             "title": f"Prism · {room.name}",
             "room_id": room_id,
             "room_name": room.name,
+            "room_role": membership.role,
         },
     )

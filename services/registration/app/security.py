@@ -1,9 +1,4 @@
-import bcrypt
+from shared.security import hash_password, verify_password
 
+__all__ = ["hash_password", "verify_password"]
 
-def hash_password(plain_password: str) -> str:
-    return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-
-def verify_password(plain_password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode("utf-8"), password_hash.encode("utf-8"))

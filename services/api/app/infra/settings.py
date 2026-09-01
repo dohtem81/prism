@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     jwt_secret: str = "dev-secret"
 
+    # Base URL the webui uses to reach the standalone registration service from the browser.
+    registration_service_url: str = "http://localhost:8100"
+
     rate_limit_enabled: bool = True
     rate_limit_messages_per_user_per_minute: int = 30
     rate_limit_messages_per_room_per_minute: int = 120

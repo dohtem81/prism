@@ -14,6 +14,7 @@ from shared.schemas.rooms import (
     CreateRoomRequest,
     CreateRoomResponse,
     JoinRoomRequest,
+    JoinRoomSelfRequest,
     RoomMessageResponse,
     RoomMembershipResponse,
     RoomSummary,
@@ -140,6 +141,44 @@ def upsert_membership(
         else:
             membership.preferred_lang = payload.preferred_lang
             membership.role = "member"
+
+        db.commit()
+    return RoomMembershipResponse(
+        room_id=membership.room_id,
+        user_id=membership.user_id,
+        role=membership.role,
+        preferred_lang=membership.preferred_lang,
+        created_at=membership.created_at,
+    )
+
+
+@router.post("/{room_id}/join", response_model=RoomMembershipResponse)
+def join_room(
+    room_id: str,
+    payload: JoinRoomSelfRequest,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user_id),
+) -> RoomMembershipResponse:
+    """Self-service join, unlike POST /members which requires the caller to already be a room admin."""
+    room = db.get(Room, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    membership = db.scalar(
+        select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == current_user_id)
+    )
+    with start_span("api.room.join", room_id=room_id, user_id=current_user_id):
+        if membership is None:
+            membership = RoomMember(
+                room_id=room_id,
+                user_id=current_user_id,
+                role="member",
+                preferred_lang=payload.preferred_lang,
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(membership)
+        else:
+            membership.preferred_lang = payload.preferred_lang
 
         db.commit()
     return RoomMembershipResponse(

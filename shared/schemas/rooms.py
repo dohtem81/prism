@@ -22,6 +22,10 @@ class JoinRoomRequest(BaseModel):
     preferred_lang: str = Field(min_length=2, max_length=8)
 
 
+class JoinRoomSelfRequest(BaseModel):
+    preferred_lang: str = Field(min_length=2, max_length=8)
+
+
 class RoomSummary(BaseModel):
     room_id: str
     name: str
