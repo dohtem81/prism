@@ -34,6 +34,28 @@ Cons:
 
 - Needs indexing and partition strategy at higher scale.
 
+Decision: split user identity into two linked tables, not one.
+
+- `public.users` (room/message identity: `display_name`, `preferred_lang`) and `auth.accounts`
+  (registration credentials: `email`, `username`, `password_hash`, isolated in the `auth` schema)
+  are separate tables, joined 1:1 via `auth.accounts.id` as a foreign key to `users.id`.
+- Why not a single merged table:
+  - Credentials stay isolated in a schema that can be locked down independently from chat data.
+  - Users register once but send many messages — `auth.accounts` stays small and low-traffic,
+    while `users`/`messages` are written and read constantly. Keeping them separate avoids
+    bloating or contending with the hot chat tables and keeps the accounts table cheap to
+    back up, audit, or migrate independently.
+  - `users.id` remains the single stable identity referenced by rooms/messages regardless of
+    how auth storage evolves later (e.g. moving to a dedicated auth database or service).
+
+### Password Hashing
+
+Decision:
+
+- Hash passwords with `bcrypt` directly (not `passlib`, which has known compatibility issues
+  with modern bcrypt releases).
+- Cap password input to 72 bytes, bcrypt's hashing limit.
+
 ### Redis
 Pros:
 

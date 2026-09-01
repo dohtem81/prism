@@ -15,7 +15,9 @@
 ```mermaid
 flowchart LR
   Client[Browser / API Client] -->|REST + WebSocket| API[FastAPI API]
+  Client -->|POST /v1/register| Registration[Registration Service]
   API --> PG[(PostgreSQL)]
+  Registration --> PG
   API --> MQ[(RabbitMQ)]
   MQ --> Worker[Celery Worker]
   Worker --> LLM[Translation Provider]
@@ -23,6 +25,7 @@ flowchart LR
   Worker -->|MessageUpdated event| API
   API -->|WebSocket push| Client
   Redis[(Redis)] -.-|cache| API
+  Redis -.-|dup-check cache| Registration
 ```
 
 ---
@@ -33,9 +36,10 @@ flowchart LR
 |---|---|
 | `api` | FastAPI REST endpoints, WebSocket gateway, browser dashboard |
 | `worker` | Celery consumer for translation jobs |
-| `postgres` | Durable store for rooms, members, messages, translations, and events |
+| `registration` | Standalone FastAPI service for account sign-up (email/username/password) |
+| `postgres` | Durable store for rooms, members, messages, translations, events, and registration accounts |
 | `rabbitmq` | Translation job queue with dead-letter support |
-| `redis` | Translation result cache; multi-instance pub/sub fanout is not yet implemented |
+| `redis` | Translation result cache, registration duplicate-check cache; multi-instance pub/sub fanout is not yet implemented |
 
 ---
 
@@ -94,6 +98,23 @@ Room admins can configure translation quality per room:
 | `high_quality` | Slower, more capable model — prioritises accuracy |
 
 Mode influences the prompt profile, model selection, timeout, retry policy, and batching behavior.
+
+---
+
+## Identity Model
+
+User identity is split across two tables linked by a shared primary key, not merged into one:
+
+| Table | Owns | Written by |
+|---|---|---|
+| `public.users` | `display_name`, `preferred_lang` — referenced by rooms, memberships, messages | API (profile updates), registration service (on sign-up) |
+| `auth.accounts` | `email`, `username`, `password_hash` — sign-up credentials only | Registration service |
+
+`auth.accounts.id` is a foreign key to `users.id` (`ondelete=CASCADE`). Registration creates both rows in a single transaction. Rationale:
+
+- **Isolation**: credentials live in a dedicated `auth` schema that can be access-controlled separately from general chat data.
+- **Write/read volume**: a user registers once but sends many messages — keeping credentials in a small, rarely-touched table avoids bloating or contending with the high-traffic `users`/`messages` tables.
+- **Stable identity**: `users.id` remains the single id referenced by rooms and messages no matter how auth storage evolves later.
 
 ---
 

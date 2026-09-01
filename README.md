@@ -18,6 +18,7 @@ When a message is sent, it is delivered immediately to all connected clients. Tr
 flowchart LR
   Client[Browser / API Client]
   API[FastAPI API]
+  Registration[Registration Service]
   PG[(PostgreSQL)]
   MQ[(RabbitMQ)]
   Worker[Celery Worker]
@@ -25,6 +26,7 @@ flowchart LR
   Redis[(Redis)]
 
   Client -->|REST + WebSocket| API
+  Client -->|POST /v1/register| Registration
   API --> PG
   API --> MQ
   MQ --> Worker
@@ -32,8 +34,21 @@ flowchart LR
   Worker --> PG
   Worker -->|MessageUpdated event| API
   API -->|WebSocket push| Client
+  Registration --> PG
   Redis -.-|cache| API
+  Redis -.-|dup-check cache| Registration
 ```
+
+**User identity is split across two linked tables**, not one:
+
+- `public.users` — the room/message identity (`display_name`, `preferred_lang`); referenced by rooms, memberships, and messages.
+- `auth.accounts` — registration credentials (`email`, `username`, `password_hash`), isolated in its own Postgres schema and owned by the registration service.
+
+`auth.accounts.id` is a foreign key to `users.id` (shared primary key, 1:1) rather than one merged table, because:
+
+- Credentials stay isolated from general chat data in a schema that can be locked down independently.
+- Users register once but send many messages — `auth.accounts` stays small and rarely written/read compared to `users`/`messages`, so keeping it separate avoids bloating or contending with the hot chat tables.
+- `users.id` stays the single stable identity referenced by rooms/messages regardless of how auth is implemented later.
 
 ## Message flow
 
@@ -71,9 +86,11 @@ The API and worker are fully decoupled. The worker only writes to Postgres and f
 | Layer | Technology |
 |---|---|
 | API + WebSocket | FastAPI (Python 3.12) |
+| Registration service | FastAPI, standalone from the API |
 | Task queue | Celery + RabbitMQ |
 | Session / pub-sub | Redis |
 | Database | PostgreSQL + Alembic |
+| Password hashing | bcrypt |
 | Containerisation | Docker Compose |
 
 ---
@@ -144,6 +161,7 @@ This creates a demo user, a demo room, and an admin membership so you can start 
 | Run tests | `docker compose -f deploy/compose/docker-compose.yml run --rm tests` |
 | API logs | `docker compose -f deploy/compose/docker-compose.yml logs -f api` |
 | Worker logs | `docker compose -f deploy/compose/docker-compose.yml logs -f worker` |
+| Registration service logs | `docker compose -f deploy/compose/docker-compose.yml logs -f registration` |
 
 **Creating a new migration after schema changes:**
 
@@ -176,6 +194,7 @@ Room/message analytics (`/v1/admin/rooms/{room_id}/metrics`) and basic observabi
 **Working now:**
 - Room creation and membership management
 - User profiles with per-user language preferences
+- Standalone registration service (`POST /v1/register`) for email/username/password sign-up, with credentials stored in a separate Postgres schema (`auth.accounts`) linked to `users` by shared primary key, and a duplicate-check cache in Redis
 - Message send, persistence, and WebSocket fan-out to all room subscribers
 - Async translation via configurable LLM provider with live `MessageUpdated` push
 - Graceful degradation — provider failures mark the message `translation_unavailable` and push a status update without breaking chat

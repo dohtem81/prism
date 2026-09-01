@@ -16,6 +16,27 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+class RegisteredAccount(Base):
+    """Credentials for a `User`, isolated in the `auth` schema.
+
+    Shares its primary key with `users.id` (one account per user), so room/message
+    relationships continue to reference `users.id` regardless of auth storage.
+    """
+
+    __tablename__ = "accounts"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_auth_accounts_email"),
+        UniqueConstraint("username", name="uq_auth_accounts_username"),
+        {"schema": "auth"},
+    )
+
+    id: Mapped[str] = mapped_column(String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
 class Room(Base):
     __tablename__ = "rooms"
 

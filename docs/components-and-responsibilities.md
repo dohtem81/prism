@@ -142,3 +142,20 @@ Planned metrics:
 - Queue wait time, provider latency, and end-to-end delay percentiles
 - Success, failure, and retry rates
 - Top language pairs by volume and cost
+
+## 11. Registration Service
+
+> **Status: Implemented.** Standalone FastAPI service, separate from the main API.
+
+Responsibilities:
+
+- Accept `POST /v1/register` with email, username, and password.
+- Check email/username uniqueness (Redis duplicate-check cache first, then PostgreSQL).
+- Hash passwords with bcrypt before persisting — plaintext passwords are never stored.
+- Create the `auth.accounts` credential row and the linked `users` row in a single transaction.
+- On conflict, return an error response with a redirect target pointing to the auth/login flow.
+
+Key outputs:
+
+- New `users` + `auth.accounts` record pair sharing the same id.
+- Duplicate-check cache entries in Redis (`registration:email:*`, `registration:username:*`).

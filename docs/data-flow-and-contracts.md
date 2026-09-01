@@ -149,6 +149,37 @@ Rules:
 
 ## REST Contracts
 
+### Register Account
+
+POST /v1/register (registration service, separate from the main API)
+
+Request:
+
+```json
+{
+  "email": "ada@example.com",
+  "username": "ada",
+  "password": "supersecret1"
+}
+```
+
+Response (201):
+
+```json
+{
+  "user_id": "a1b2c3...",
+  "email": "ada@example.com",
+  "username": "ada",
+  "created_at": "2026-08-31T12:00:00Z"
+}
+```
+
+Creates a linked `users` row (referenced by rooms/messages) and an `auth.accounts` row
+(credentials, in the isolated `auth` schema) sharing the same id, in one transaction.
+
+On conflict (email or username already registered), returns 409 with a `redirect_url` pointing
+to the auth/login flow instead of a generic validation error.
+
 ### Create Room
 
 POST /v1/rooms
@@ -263,6 +294,8 @@ Recommended key patterns:
 - translation:cache:{hash}
 - rate_limit:{scope}:{id}
 - room:analytics:{room_id}:{window}:{bucket}
+- registration:email:{email}
+- registration:username:{username}
 
 TTL guidance:
 
@@ -271,6 +304,8 @@ TTL guidance:
 - translation:cache: 1 to 24 hours.
 - rate_limit and dedup keys: policy-specific short windows.
 - room:analytics: 15 to 120 seconds depending on dashboard freshness target.
+- registration:email and registration:username: matches the registration service's
+  duplicate-check TTL (default 1 hour) — a fast pre-check before hitting PostgreSQL.
 
 ## Admin Metrics API Contracts
 
@@ -332,3 +367,4 @@ Suggested codes:
 - MESSAGE_TOO_LARGE
 - TRANSLATION_FAILED
 - RATE_LIMITED
+- ACCOUNT_ALREADY_EXISTS
