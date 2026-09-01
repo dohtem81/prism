@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #111827;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --accent-strong: #2563eb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        text-align: center;
+        background: var(--panel);
+        border: 1px solid rgba(148,163,184,0.2);
+        border-radius: 14px;
+        padding: 32px 24px;
+      }
+      h1 { margin: 0 0 8px; font-size: 1.6rem; }
+      p { margin: 0 0 24px; color: var(--muted); }
+      .actions {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      a.button {
+        display: block;
+        text-decoration: none;
+        border-radius: 10px;
+        padding: 12px 18px;
+        font-weight: 600;
+      }
+      a.primary {
+        background: var(--accent-strong);
+        color: white;
+      }
+      a.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid rgba(148,163,184,0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Prism</h1>
+      <p>Real-time chat, translated live for every participant.</p>
+      <div class="actions">
+        <a class="button primary" href="/ui/login">Log in</a>
+        <a class="button secondary" href="/ui/register">Register</a>
+      </div>
+    </div>
+  </body>
+</html>

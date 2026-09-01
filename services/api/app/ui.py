@@ -11,7 +11,19 @@ from services.api.app.infra.settings import settings
 from shared.db.models import Room, RoomMember
 
 router = APIRouter(prefix="/ui", tags=["ui"])
+root_router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="templates")
+
+
+@root_router.get("/", response_class=HTMLResponse)
+async def welcome_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "welcome.html",
+        {
+            "request": request,
+            "title": "Prism",
+        },
+    )
 
 
 @router.get("/register", response_class=HTMLResponse)

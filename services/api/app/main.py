@@ -10,7 +10,7 @@ from services.api.app.api.rooms import router as rooms_router
 from services.api.app.api.users import router as users_router
 from services.api.app.infra.settings import settings
 from services.api.app.realtime.websocket_gateway import router as websocket_router
-from services.api.app.ui import router as ui_router
+from services.api.app.ui import root_router, router as ui_router
 from shared.logging_utils import get_logger, reset_correlation_id, set_correlation_id
 from shared.tracing import reset_trace_context, set_trace_context
 
@@ -60,3 +60,4 @@ app.include_router(users_router)
 app.include_router(admin_router)
 app.include_router(websocket_router)
 app.include_router(ui_router)
+app.include_router(root_router)

@@ -256,13 +256,17 @@
           <div class="stats-grid" id="statsGrid"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="chatPanel">
           <div class="composer">
             <input id="messageInput" type="text" placeholder="Type a message…" />
             <button id="sendButton">Send</button>
           </div>
 
           <div id="feed" class="feed"></div>
+        </section>
+
+        <section class="panel" id="getStartedPanel" style="display: none;">
+          <p class="empty">No room selected yet. Use <strong>Create room</strong> or <strong>Join room</strong> in the sidebar to get started.</p>
         </section>
       </main>
     </div>
@@ -612,6 +616,8 @@
         loadRoomStats();
       } else {
         roomTitle.textContent = 'Dashboard';
+        document.getElementById('chatPanel').style.display = 'none';
+        document.getElementById('getStartedPanel').style.display = 'block';
       }
 
       fetchRooms();

@@ -129,9 +129,20 @@ docker compose -f deploy/compose/docker-compose.yml up --build
 docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head
 ```
 
-**5. Open the dashboard**
+**5. Open the webui**
 
-Navigate to `http://localhost:8000/ui` — create rooms, add users, send messages, and watch translations arrive live.
+Navigate to `http://localhost:8000/` — the welcome page links to **Log in** or **Register**.
+Register an account, log in, then create or join a room from the dashboard. From there you can
+send messages, change your default language (Settings), and — if you're a room's owner — see
+live message/translation/cost stats in that room.
+
+| Page | URL |
+|---|---|
+| Welcome (login / register) | `http://localhost:8000/` |
+| Register | `http://localhost:8000/ui/register` |
+| Login | `http://localhost:8000/ui/login` |
+| Dashboard (create/join room) | `http://localhost:8000/ui` |
+| Room chat | `http://localhost:8000/ui/rooms/{room_id}` |
 
 **6. Verify the API**
 
