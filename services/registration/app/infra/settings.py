@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     redis_cache_ttl_seconds: int = 3600
 
     # Where clients are sent when registration fails because the account already exists.
-    auth_service_url: str = "http://localhost:8000/v1/auth/login"
+    auth_service_url: str = "http://localhost:8000/ui/login"
 
 
 settings = Settings()

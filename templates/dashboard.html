@@ -124,6 +124,15 @@
       .message-body {
         line-height: 1.5;
       }
+      .message-body.is-translation {
+        font-weight: 500;
+      }
+      .original-text {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.85rem;
+        font-style: italic;
+      }
       .translation {
         margin-top: 8px;
         background: rgba(34,197,94,0.06);
@@ -132,6 +141,30 @@
         padding: 8px 10px;
         color: #d1fae5;
         font-size: 0.9rem;
+      }
+      .status-badge {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .status-badge.pending {
+        background: rgba(96,165,250,0.12);
+        color: var(--accent);
+      }
+      .status-badge.translated {
+        background: rgba(34,197,94,0.12);
+        color: var(--success);
+      }
+      .status-badge.partial {
+        background: rgba(245,158,11,0.12);
+        color: var(--warning);
+      }
+      .status-badge.unavailable {
+        background: rgba(239,68,68,0.12);
+        color: var(--danger);
       }
       .empty {
         color: var(--muted);
@@ -155,6 +188,14 @@
         gap: 8px;
       }
       .sidebar-form input {
+        background: var(--panel-alt);
+        border: 1px solid rgba(148,163,184,0.25);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 0.9rem;
+      }
+      .sidebar-form select {
         background: var(--panel-alt);
         border: 1px solid rgba(148,163,184,0.25);
         color: var(--text);
@@ -211,7 +252,7 @@
     <div class="app">
       <aside class="sidebar">
         <h2>Prism</h2>
-        <div class="status-pill" id="connectionState">Connecting…</div>
+        <div class="status-pill" id="connectionState">No room selected</div>
         <ul class="room-list" id="roomList"></ul>
 
         <div class="sidebar-section">
@@ -242,12 +283,16 @@
             <button type="submit">Save</button>
           </form>
           <div id="settingsNote" class="form-note"></div>
+          <div class="form-note">Your user ID (share so a room owner can add you): <code id="ownUserId"></code></div>
         </div>
       </aside>
 
       <main class="content">
         <div class="topbar">
-          <h1 id="roomTitle">Dashboard</h1>
+          <div>
+            <h1 id="roomTitle">Dashboard</h1>
+            <div class="form-note" id="roomIdNote" style="display: none;"></div>
+          </div>
           <div class="status-pill" id="roomStatus">Ready</div>
         </div>
 
@@ -256,17 +301,35 @@
           <div class="stats-grid" id="statsGrid"></div>
         </section>
 
+        <section class="panel stats-panel" id="addMemberPanel" style="display: none;">
+          <h3>Add member (owner)</h3>
+          <form id="addMemberForm" class="sidebar-form" style="max-width: 420px;">
+            <input id="addMemberUserId" type="text" placeholder="Their user ID" required maxlength="64" />
+            <input id="addMemberLang" type="text" placeholder="Their language (e.g. en)" value="en" required minlength="2" maxlength="8" />
+            <button type="submit">Add to room</button>
+          </form>
+          <div id="addMemberNote" class="form-note"></div>
+        </section>
+
         <section class="panel" id="chatPanel">
           <div class="composer">
             <input id="messageInput" type="text" placeholder="Type a message…" />
             <button id="sendButton">Send</button>
           </div>
+          <div id="sendNote" class="form-note"></div>
 
           <div id="feed" class="feed"></div>
         </section>
 
         <section class="panel" id="getStartedPanel" style="display: none;">
-          <p class="empty">No room selected yet. Use <strong>Create room</strong> or <strong>Join room</strong> in the sidebar to get started.</p>
+          <h3>Your rooms</h3>
+          <div class="sidebar-form" style="max-width: 420px;">
+            <select id="roomSelect">
+              <option value="">Select a room you own or belong to…</option>
+            </select>
+            <button id="openRoomButton">Open room</button>
+          </div>
+          <p class="empty">Or use <strong>Create room</strong> or <strong>Join room</strong> in the sidebar to get started.</p>
         </section>
       </main>
     </div>
@@ -275,9 +338,10 @@
       const params = new URLSearchParams(window.location.search);
       const activeUserId = params.get('user_id') || 'dev-user';
       const activeToken = params.get('token') || 'dev-token';
-      const roomId = {{ room_id|tojson if room_id is defined and room_id else "null" }};
-      const roomName = {{ room_name|tojson if room_name is defined and room_name else '"Dashboard"' }};
-      const roomRole = {{ room_role|tojson if room_role is defined and room_role else "null" }};
+      const roomId = {{ (room_id if room_id is defined and room_id else none)|tojson }};
+      const roomName = {{ (room_name if room_name is defined and room_name else "Dashboard")|tojson }};
+      const roomRole = {{ (room_role if room_role is defined and room_role else none)|tojson }};
+      const roomPreferredLang = {{ (room_preferred_lang if room_preferred_lang is defined and room_preferred_lang else none)|tojson }};
       const wsBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
       const state = {
         rooms: [],
@@ -292,6 +356,7 @@
       const connectionState = document.getElementById('connectionState');
       const messageInput = document.getElementById('messageInput');
       const sendButton = document.getElementById('sendButton');
+      const sendNote = document.getElementById('sendNote');
       const createRoomForm = document.getElementById('createRoomForm');
       const createRoomNote = document.getElementById('createRoomNote');
       const joinRoomForm = document.getElementById('joinRoomForm');
@@ -300,6 +365,15 @@
       const settingsNote = document.getElementById('settingsNote');
       const statsPanel = document.getElementById('statsPanel');
       const statsGrid = document.getElementById('statsGrid');
+      const roomSelect = document.getElementById('roomSelect');
+      const openRoomButton = document.getElementById('openRoomButton');
+      const ownUserId = document.getElementById('ownUserId');
+      const roomIdNote = document.getElementById('roomIdNote');
+      const addMemberPanel = document.getElementById('addMemberPanel');
+      const addMemberForm = document.getElementById('addMemberForm');
+      const addMemberNote = document.getElementById('addMemberNote');
+
+      ownUserId.textContent = activeUserId;
 
       function roomQueryString() {
         const search = new URLSearchParams();
@@ -310,6 +384,8 @@
 
       function renderRooms() {
         roomList.innerHTML = '';
+        roomSelect.innerHTML = '<option value="">Select a room you own or belong to…</option>';
+
         if (!state.rooms.length) {
           const li = document.createElement('li');
           li.className = 'empty';
@@ -326,8 +402,20 @@
           link.textContent = room.name;
           item.appendChild(link);
           roomList.appendChild(item);
+
+          const option = document.createElement('option');
+          option.value = room.room_id;
+          option.textContent = `${room.name} (${room.role})`;
+          roomSelect.appendChild(option);
         }
       }
+
+      const STATUS_BADGES = {
+        original_only: { className: 'pending', label: 'Translating…' },
+        translated: { className: 'translated', label: 'Translated' },
+        partially_translated: { className: 'partial', label: 'Partially translated' },
+        translation_unavailable: { className: 'unavailable', label: 'Translation unavailable' },
+      };
 
       function renderMessages() {
         feed.innerHTML = '';
@@ -343,22 +431,48 @@
           const card = document.createElement('div');
           card.className = 'message';
 
+          const badge = STATUS_BADGES[message.status] || STATUS_BADGES.original_only;
           const header = document.createElement('div');
           header.className = 'message-header';
-          header.innerHTML = `<span>${message.author_user_id}</span><span>${new Date(message.created_at).toLocaleString()}</span>`;
+          header.innerHTML = `<span>${message.author_user_id}</span><span><span class="status-badge ${badge.className}">${badge.label}</span> ${new Date(message.created_at).toLocaleString()}</span>`;
+          card.appendChild(header);
+
+          const myTranslation = roomPreferredLang && message.translations ? message.translations[roomPreferredLang] : null;
+          const needsTranslationForMe = roomPreferredLang && message.source_lang !== roomPreferredLang;
+          const showingTranslation = !!myTranslation && needsTranslationForMe;
 
           const body = document.createElement('div');
-          body.className = 'message-body';
-          body.textContent = message.content_original || '…';
-
-          card.appendChild(header);
+          body.className = showingTranslation ? 'message-body is-translation' : 'message-body';
+          body.textContent = (showingTranslation ? myTranslation.content : message.content_original) || '…';
           card.appendChild(body);
 
-          if (message.translations && Object.keys(message.translations).length) {
+          if (showingTranslation) {
+            const original = document.createElement('div');
+            original.className = 'original-text';
+            original.textContent = `Original (${message.source_lang}): ${message.content_original}`;
+            card.appendChild(original);
+          } else if (needsTranslationForMe && message.status !== 'original_only') {
+            // Status can read "Translated" even when no translation exists for *my* language —
+            // that happens when this message predates my language being added to the room.
+            const note = document.createElement('div');
+            note.className = 'original-text';
+            note.textContent = `No translation available in your language (${roomPreferredLang}).`;
+            card.appendChild(note);
+          }
+
+          const otherTranslations = Object.entries(message.translations || {}).filter(([lang]) => lang !== roomPreferredLang);
+          if (otherTranslations.length) {
             const list = document.createElement('div');
             list.className = 'translation';
-            const entries = Object.entries(message.translations).map(([lang, value]) => `${lang}: ${value.content}`).join(' | ');
-            list.textContent = entries;
+            list.textContent = otherTranslations.map(([lang, value]) => `${lang}: ${value.content}`).join(' | ');
+            card.appendChild(list);
+          } else if (!showingTranslation && message.status === 'translation_unavailable') {
+            const list = document.createElement('div');
+            list.className = 'translation';
+            list.style.background = 'rgba(239,68,68,0.06)';
+            list.style.borderLeftColor = 'var(--danger)';
+            list.style.color = '#fecaca';
+            list.textContent = 'No translations available for this message.';
             card.appendChild(list);
           }
 
@@ -380,9 +494,6 @@
           }
           state.rooms = await response.json();
           renderRooms();
-          if (!roomId && state.rooms.length) {
-            window.location.href = `/ui/rooms/${state.rooms[0].room_id}?${roomQueryString()}`;
-          }
         } catch (error) {
           console.error('Failed to load rooms', error);
         }
@@ -456,7 +567,9 @@
           if (payload.type === 'MessageUpdated') {
             const existing = state.messages.find(item => item.message_id === payload.message_id);
             if (existing) {
-              existing.translations = payload.translations;
+              // translations_patch is always freshly computed and authoritative; translations
+              // may lag behind it, so merge with translations_patch taking priority.
+              existing.translations = { ...(payload.translations || {}), ...(payload.translations_patch || {}) };
               existing.status = payload.status;
             }
             renderMessages();
@@ -479,6 +592,7 @@
         const content = messageInput.value.trim();
         if (!content) return;
 
+        sendNote.textContent = '';
         const payload = {
           author_user_id: activeUserId,
           room_id: roomId,
@@ -497,11 +611,13 @@
             body: JSON.stringify(payload)
           });
           if (!response.ok) {
-            throw new Error('send failed');
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || `Send failed (${response.status})`);
           }
           messageInput.value = '';
         } catch (error) {
           console.error('Failed to send message', error);
+          sendNote.textContent = error.message || 'Failed to send message';
         }
       }
 
@@ -603,6 +719,29 @@
         }
       }
 
+      addMemberForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        addMemberNote.textContent = '';
+        const memberUserId = document.getElementById('addMemberUserId').value.trim();
+        const preferredLang = document.getElementById('addMemberLang').value.trim();
+
+        try {
+          const response = await fetch(`/v1/rooms/${roomId}/members?${roomQueryString()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            body: JSON.stringify({ user_id: memberUserId, preferred_lang: preferredLang }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.detail || 'Failed to add member');
+
+          addMemberForm.reset();
+          document.getElementById('addMemberLang').value = 'en';
+          addMemberNote.textContent = `Added ${memberUserId} to the room.`;
+        } catch (error) {
+          addMemberNote.textContent = error.message;
+        }
+      });
+
       sendButton.addEventListener('click', sendMessage);
       messageInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -610,8 +749,20 @@
         }
       });
 
+      openRoomButton.addEventListener('click', () => {
+        if (!roomSelect.value) return;
+        window.location.href = `/ui/rooms/${roomSelect.value}?${roomQueryString()}`;
+      });
+      roomSelect.addEventListener('change', () => openRoomButton.click());
+
       if (roomId) {
         roomTitle.textContent = roomName || 'Room';
+        roomIdNote.textContent = `Room ID: ${roomId} (share this so others can join)`;
+        roomIdNote.style.display = 'block';
+        if (roomRole === 'admin') {
+          addMemberPanel.style.display = 'block';
+        }
+        setConnectionState('Connecting…');
         connectSocket();
         loadRoomStats();
       } else {

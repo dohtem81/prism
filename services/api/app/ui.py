@@ -83,5 +83,6 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
             "room_id": room_id,
             "room_name": room.name,
             "room_role": membership.role,
+            "room_preferred_lang": membership.preferred_lang,
         },
     )

@@ -73,7 +73,8 @@ class ConnectionManager:
             pubsub.subscribe(channel)
             try:
                 while True:
-                    message = pubsub.get_message(timeout=1)
+                    # redis-py's pubsub is sync; run it in a thread so it never blocks the event loop.
+                    message = await asyncio.to_thread(pubsub.get_message, timeout=1)
                     if not message or message.get("type") != "message":
                         continue
                     data = message.get("data")

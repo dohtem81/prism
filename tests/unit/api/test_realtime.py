@@ -96,16 +96,14 @@ def test_message_send_and_translation_flow_are_enqueued_and_updated() -> None:
                     response = send_message(_payload(), db=db, current_user_id="user_1")
 
                 assert response.translation_job_enqueued is True
-                celery_client_mock.send_task.assert_called_once_with(
-                    "services.worker.app.tasks.translation.translate_message",
-                    kwargs={
-                        "message_id": response.message_id,
-                        "room_id": "room_1",
-                        "source_lang": "pl",
-                        "content_original": "Czesc",
-                    },
-                    queue="translation.requested.q",
-                )
+                celery_client_mock.send_task.assert_called_once()
+                call_args, call_kwargs = celery_client_mock.send_task.call_args
+                assert call_args == ("services.worker.app.tasks.translation.translate_message",)
+                assert call_kwargs["queue"] == "translation.requested.q"
+                assert call_kwargs["kwargs"]["message_id"] == response.message_id
+                assert call_kwargs["kwargs"]["room_id"] == "room_1"
+                assert call_kwargs["kwargs"]["source_lang"] == "pl"
+                assert call_kwargs["kwargs"]["content_original"] == "Czesc"
 
                 event = websocket.receive_json()
                 assert event["type"] == "MessageCreated"

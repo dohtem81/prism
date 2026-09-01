@@ -40,8 +40,9 @@ def test_build_translation_provider_uses_configured_model() -> None:
 
 
 def test_build_translation_provider_rejects_unknown_provider() -> None:
+    # Explicit empty fallback so this doesn't depend on TRANSLATION_FALLBACK_PROVIDER in the ambient env/.env.
     with pytest.raises(ValueError, match="Unsupported translation provider"):
-        build_translation_provider(provider_name="unknown")
+        build_translation_provider(provider_name="unknown", fallback_provider_name="")
 
 
 def test_run_translation_task_sends_failed_job_to_dead_letter_queue() -> None:

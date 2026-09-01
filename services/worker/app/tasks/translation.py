@@ -41,8 +41,48 @@ class OpenAITranslationProvider(TranslationProvider):
         return response.output_text.strip(), input_tokens, output_tokens
 
 
+class OpenRouterTranslationProvider(TranslationProvider):
+    """Routes translation requests through OpenRouter's OpenAI-compatible API, giving access to many underlying LLMs by model slug (e.g. "openai/gpt-4.1-mini", "anthropic/claude-3.5-sonnet")."""
+
+    def __init__(self, model: str | None = None) -> None:
+        self.model = model or settings.translation_model
+        if not settings.openrouter_api_key:
+            raise RuntimeError("OPENROUTER_API_KEY is not configured")
+
+        default_headers = {"X-Title": settings.openrouter_app_name}
+        if settings.openrouter_app_url:
+            default_headers["HTTP-Referer"] = settings.openrouter_app_url
+
+        self._client = OpenAI(
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            default_headers=default_headers,
+        )
+
+    def translate(self, content_original: str, source_lang: str, target_lang: str) -> tuple[str, int | None, int | None]:
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Translate the message while preserving intent and tone. Return only translated text with no explanations.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Translate from {source_lang} to {target_lang}.\n\nMessage: {content_original}",
+                },
+            ],
+        )
+
+        content = response.choices[0].message.content or ""
+        input_tokens = getattr(response.usage, "prompt_tokens", None) if response.usage else None
+        output_tokens = getattr(response.usage, "completion_tokens", None) if response.usage else None
+        return content.strip(), input_tokens, output_tokens
+
+
 _TRANSLATION_PROVIDERS: dict[str, type[TranslationProvider]] = {
     "openai": OpenAITranslationProvider,
+    "openrouter": OpenRouterTranslationProvider,
 }
 
 
@@ -52,13 +92,15 @@ def _resolve_provider_and_model(
     fallback_provider_name: str | None = None,
     fallback_model_name: str | None = None,
 ) -> tuple[str, str]:
-    selected_provider = (provider_name or settings.translation_provider or "openai").lower()
-    selected_model = model_name or settings.translation_model or settings.openai_translation_model
+    selected_provider = (provider_name or settings.translation_provider or "openrouter").lower()
+    selected_model = model_name or settings.translation_model or _DEFAULT_TRANSLATION_MODEL
 
     if selected_provider in _TRANSLATION_PROVIDERS:
         return selected_provider, selected_model
 
-    fallback_provider = (fallback_provider_name or settings.translation_fallback_provider or "").lower()
+    # Distinguish "not passed" (use configured fallback) from an explicit "" (no fallback at all).
+    fallback_source = fallback_provider_name if fallback_provider_name is not None else settings.translation_fallback_provider
+    fallback_provider = (fallback_source or "").lower()
     fallback_model = fallback_model_name or settings.translation_fallback_model or selected_model
 
     if fallback_provider in _TRANSLATION_PROVIDERS:
@@ -102,6 +144,26 @@ def _cache_key(content_original: str, source_lang: str, target_lang: str, mode: 
     payload = f"{content_original}|{source_lang}|{target_lang}|{mode}"
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return f"translation:cache:{digest}"
+
+
+_QUALITY_MODE_MODEL_SETTINGS = {
+    "low_latency": "translation_model_low_latency",
+    "balanced": "translation_model_balanced",
+    "high_quality": "translation_model_high_quality",
+}
+
+# Used only when neither TRANSLATION_MODEL nor a per-mode override is configured.
+_DEFAULT_TRANSLATION_MODEL = "openai/gpt-4.1-mini"
+
+
+def _model_for_quality_mode(quality_mode: str | None) -> str | None:
+    """TRANSLATION_MODEL, if set, wins for every quality mode. Otherwise use that mode's
+    override, if any; returns None when nothing is configured (caller applies the default)."""
+    if settings.translation_model:
+        return settings.translation_model
+
+    attr = _QUALITY_MODE_MODEL_SETTINGS.get(quality_mode or "")
+    return getattr(settings, attr, None) if attr else None
 
 
 def _estimate_cost_usd(input_tokens: int | None, output_tokens: int | None) -> float | None:
@@ -182,6 +244,8 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
         success_count = 0
         failure_count = 0
         started_at = datetime.now(timezone.utc)
+        room_model = _model_for_quality_mode(room.default_translation_mode)
+        active_provider_name, _ = _resolve_provider_and_model(model_name=room_model)
 
         for target_lang in target_langs:
             existing = db.scalar(
@@ -215,7 +279,7 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
                         translated_text = cached
                         provider_latency_ms = 0
                     else:
-                        provider = build_translation_provider()
+                        provider = build_translation_provider(model_name=room_model)
                         translated_text, input_tokens, output_tokens = provider.translate(
                             content_original=content_original,
                             source_lang=source_lang,
@@ -248,7 +312,7 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
                 room_id=room_id,
                 message_id=message_id,
                 target_lang=target_lang,
-                provider="openai",
+                provider=active_provider_name,
                 status=status,
                 attempt=1,
                 queue_delay_ms=queue_delay_ms,
@@ -289,6 +353,10 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
             message.status = "translation_unavailable"
 
         message.version += 1
+
+        # Session has autoflush=False, so without this the "translations" query below (run before
+        # commit) would miss the MessageTranslation rows just added in the loop above.
+        db.flush()
 
         with start_span("worker.translation.dispatch_update", message_id=message_id, room_id=room_id):
             room_sequence = (db.scalar(select(func.max(RoomEvent.room_sequence)).where(RoomEvent.room_id == room_id)) or 0) + 1

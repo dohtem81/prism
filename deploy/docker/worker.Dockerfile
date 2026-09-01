@@ -10,4 +10,5 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY . /app
 
-CMD ["celery", "-A", "services.worker.app.celery_app:celery_app", "worker", "--loglevel=INFO"]
+# Task routing sends translation jobs to translation.requested.q, so the worker must consume it explicitly.
+CMD ["celery", "-A", "services.worker.app.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "celery,translation.requested.q"]

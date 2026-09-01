@@ -108,11 +108,11 @@ cp .env.example .env
 **2. Set your translation provider in `.env`**
 
 ```env
-TRANSLATION_PROVIDER=openai
-TRANSLATION_MODEL=gpt-4.1-mini
+TRANSLATION_PROVIDER=openrouter
+TRANSLATION_MODEL=openai/gpt-4.1-mini
 TRANSLATION_FALLBACK_PROVIDER=openai
 TRANSLATION_FALLBACK_MODEL=gpt-4.1-mini
-OPENAI_API_KEY=your_key_here
+OPENROUTER_API_KEY=your_key_here
 ```
 
 > If port 8000 is already in use, set `API_PORT` in `.env` to a free port (e.g. `8010`).

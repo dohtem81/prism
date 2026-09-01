@@ -13,4 +13,6 @@ celery_app.conf.task_routes = {
     },
 }
 
-celery_app.autodiscover_tasks(["services.worker.app.tasks"])
+# autodiscover_tasks(["services.worker.app.tasks"]) would look for a "tasks.tasks" submodule,
+# which doesn't exist here, so tasks never registered. Import the module directly instead.
+import services.worker.app.tasks.translation  # noqa: E402, F401
