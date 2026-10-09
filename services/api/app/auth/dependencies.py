@@ -12,13 +12,13 @@ ALGORITHM = "HS256"
 
 
 def create_access_token(subject: str) -> str:
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=8)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_ttl_minutes)
     payload = {"sub": subject, "exp": expires_at}
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
 
 
 def resolve_authenticated_user_id(token: str) -> str:
-    if token == "dev-token":
+    if token == "dev-token" and settings.app_env == "dev":
         return "dev-user"
 
     try:

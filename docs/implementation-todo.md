@@ -47,7 +47,7 @@ Tracks current task status and next actions.
 | P1-21 | Milestone 6 | Observability | Add full request tracing and end-to-end distributed tracing beyond basic correlation IDs | DONE | Medium | 2026-08-30 | Lightweight trace context (`shared/tracing.py`) with trace_id/span_id propagates from HTTP requests through Celery into the worker; spans instrument message/room/websocket/admin API handlers and translation task execution (provider call, DLQ, dispatch). Exporter/storage backend remains deferred. See docs/distributed-tracing-plan.md. |
 | P1-22 | Cross-cutting | Operations | Capture load, latency, and performance baselines under realistic traffic | TODO | Medium | 2026-08-30 | No benchmark or load/performance dataset exists yet. See docs/performance-baselines-plan.md. |
 | P1-23 | Cross-cutting | Security | Add real multi-tenancy boundaries and stronger isolation controls | TODO | Medium | 2026-08-30 | There is no tenant model or hardened multi-tenant isolation beyond basic JWT auth. See docs/multi-tenancy-hardening-plan.md. |
-| P1-24 | Cross-cutting | Security | Harden auth and API security beyond basic JWT validation | TODO | Medium | 2026-08-30 | Current security posture is intentionally limited to JWT-based user identity with no broader hardening pass. A concrete 4-phase plan (close known gaps, token lifecycle/revocation, session visibility, transport/auditability) is documented in docs/auth-security-hardening-plan.md, including specific gaps found in `services/api/app/auth/dependencies.py` (unguarded `dev-token` bypass, 8h non-revocable tokens, missing CORS config). |
+| P1-24 | Cross-cutting | Security | Harden auth and API security beyond basic JWT validation | IN_PROGRESS | Medium | 2026-10-09 | Phase 1 (close known gaps) DONE: `dev-token` bypass only works when `APP_ENV=dev`; access tokens use `ACCESS_TOKEN_TTL_MINUTES` (default 30) instead of 8h; startup logs a WARNING on the default `jwt_secret` outside dev; explicit, configurable CORS (`CORS_ALLOWED_ORIGINS`, no wildcard with credentials); `.env.example` updated; covered by `tests/unit/api/test_auth_hardening.py`. Remaining phases (token lifecycle/revocation, session visibility, transport/auditability) are TODO. See docs/auth-security-hardening-plan.md. |
 
 ---
 
@@ -56,7 +56,7 @@ Tracks current task status and next actions.
 1. Multi-instance fanout — Redis pub/sub across API replicas (P1-19).
 2. Performance baselines — capture load and latency data under realistic traffic (P1-22).
 3. Multi-tenancy hardening — real tenant boundaries and stronger isolation (P1-23).
-4. Auth/API security hardening beyond basic JWT validation (P1-24).
+4. Auth/API security hardening beyond basic JWT validation (P1-24) — Phase 1 done; token lifecycle/revocation, session visibility, and transport/auditability remain.
 
 > These are the only remaining TODO items in the tracker; all other milestones and cross-cutting tasks are DONE. P1-19 is planned in docs/single-instance-scaling-deferred-plan.md, P1-22 in docs/performance-baselines-plan.md, P1-23 in docs/multi-tenancy-hardening-plan.md, and P1-24 in docs/auth-security-hardening-plan.md.
 
@@ -74,3 +74,4 @@ Tracks current task status and next actions.
 | 2026-08-12 | Docs rewritten for clarity; Mermaid diagrams added to README and data-flow doc |
 | 2026-08-16 | WebSocket auth hardened to token-derived identity, realtime event envelope fields aligned with contract, history anchor validation tightened, and payload input limits enforced |
 | 2026-08-30 | Added deferred architecture and hardening TODOs for single-instance status, no rate limiting/quotas, limited observability, missing performance data, and basic JWT-only security posture; also linked the explicit scaling-deferral plan for the single-instance choice |
+| 2026-10-09 | P1-24 moved to IN_PROGRESS: auth hardening Phase 1 implemented (`dev-token` gated to dev, 30-minute access tokens, default-secret startup warning, explicit CORS, `.env.example` updated) |

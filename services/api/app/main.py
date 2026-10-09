@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from services.api.app.api.admin import router as admin_router
 from services.api.app.api.auth import router as auth_router
@@ -18,6 +19,25 @@ from shared.tracing import reset_trace_context, set_trace_context
 logger = get_logger("prism.api")
 
 app = FastAPI(title=settings.app_name)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def check_security_settings() -> None:
+    if settings.jwt_secret == "dev-secret" and settings.app_env != "dev":
+        logger.warning(
+            "insecure_jwt_secret",
+            extra={"detail": "JWT_SECRET is the default 'dev-secret' while APP_ENV is not 'dev'; set a strong secret"},
+        )
+
+
+app.add_event_handler("startup", check_security_settings)
 
 
 @app.middleware("http")

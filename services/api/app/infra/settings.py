@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     jwt_secret: str = "dev-secret"
+    access_token_ttl_minutes: int = 30
+    # JSON list in env, e.g. CORS_ALLOWED_ORIGINS=["https://app.example.com"]. Never use "*" with credentials.
+    cors_allowed_origins: list[str] = ["http://localhost:8000"]
 
     # Base URL the webui uses to reach the standalone registration service from the browser.
     registration_service_url: str = "http://localhost:8100"
