@@ -1,0 +1,20 @@
+{
+	# Deployment-wide Caddy options go here; HTTPS is automatic.
+}
+
+# Set DOMAIN in .env to your real public hostname (DNS must point at this host, ports 80/443 open)
+# and Caddy obtains and renews certificates by itself. With the default "localhost" it uses a
+# locally trusted internal CA instead.
+#
+# Routing is path-based on one hostname: POST /v1/register goes to the registration service,
+# everything else (UI, REST, WebSockets) goes to the API. Point REGISTRATION_SERVICE_URL at
+# https://<DOMAIN> so the sign-up page posts to the same origin.
+{$DOMAIN:localhost} {
+	handle /v1/register {
+		reverse_proxy registration:8100
+	}
+
+	handle {
+		reverse_proxy api:8000
+	}
+}

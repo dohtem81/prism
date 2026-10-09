@@ -1,3 +1,4 @@
+# Only Caddy publishes 80/443; every other service is reachable only by service name on the compose network.
 services:
   api:
     build:
@@ -5,8 +6,6 @@ services:
       dockerfile: deploy/docker/api.Dockerfile
     env_file:
       - ../../.env
-    ports:
-      - "${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,13 +34,28 @@ services:
       dockerfile: deploy/docker/registration.Dockerfile
     env_file:
       - ../../.env
-    ports:
-      - "${REGISTRATION_PORT:-8100}:8100"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      # Public hostname for automatic HTTPS; set DOMAIN in .env. Defaults to localhost (self-signed).
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - registration
 
   tests:
     build:
@@ -66,8 +80,6 @@ services:
       POSTGRES_DB: prism
       POSTGRES_USER: prism
       POSTGRES_PASSWORD: prism
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -81,9 +93,6 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: prism
       RABBITMQ_DEFAULT_PASS: prism
-    ports:
-      - "5672:5672"
-      - "15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 10s
@@ -92,8 +101,8 @@ services:
 
   redis:
     image: redis:7
-    ports:
-      - "6379:6379"
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
