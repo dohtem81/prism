@@ -5,8 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from services.api.app.auth.dependencies import (
-    create_access_token,
-    create_refresh_token,
+    issue_token_pair,
     revoke_session_tokens,
     rotate_refresh_token,
 )
@@ -29,11 +28,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
     if account is None or not verify_password(payload.password, account.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    return LoginResponse(
-        access_token=create_access_token(account.id),
-        refresh_token=create_refresh_token(account.id),
-        user_id=account.id,
-    )
+    access_token, refresh_token = issue_token_pair(account.id)
+    return LoginResponse(access_token=access_token, refresh_token=refresh_token, user_id=account.id)
 
 
 @router.post("/refresh", response_model=TokenPairResponse)

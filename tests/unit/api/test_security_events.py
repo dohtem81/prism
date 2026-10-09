@@ -109,7 +109,9 @@ def test_refresh_token_reuse_emits_token_reused_and_counts(fake_redis, caplog) -
     with patch.object(dependencies.token_store, "store_refresh"):
         refresh = create_refresh_token("user_1")
 
-    with patch.object(dependencies.token_store, "consume_refresh", return_value=(RefreshState.REUSED, "user_1")):
+    with patch.object(dependencies.token_store, "consume_refresh", return_value=(RefreshState.REUSED, "user_1")), patch.object(
+        dependencies.token_store, "revoke_all_sessions", return_value=2
+    ):
         with caplog.at_level(logging.INFO):
             response = TestClient(app).post("/v1/auth/refresh", json={"refresh_token": refresh})
 

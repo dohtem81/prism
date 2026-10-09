@@ -15,50 +15,7 @@ from services.api.app.auth.dependencies import (
 from services.api.app.auth.token_store import RefreshState, TokenStore, TokenStoreUnavailable
 from services.api.app.infra.settings import settings
 from services.api.app.main import app
-
-
-class FakeRedis:
-    def __init__(self) -> None:
-        self.strings: dict[str, str] = {}
-        self.hashes: dict[str, dict[str, str]] = {}
-        self.ttls: dict[str, int] = {}
-
-    def set(self, key, value, ex=None):
-        self.strings[key] = value
-        if ex:
-            self.ttls[key] = ex
-
-    def exists(self, key):
-        return int(key in self.strings or key in self.hashes)
-
-    def hgetall(self, key):
-        return dict(self.hashes.get(key, {}))
-
-    def hsetnx(self, key, field, value):
-        bucket = self.hashes.setdefault(key, {})
-        if field in bucket:
-            return 0
-        bucket[field] = value
-        return 1
-
-    def pipeline(self):
-        return _FakePipeline(self)
-
-
-class _FakePipeline:
-    def __init__(self, client: FakeRedis) -> None:
-        self._client = client
-        self._ops = []
-
-    def hset(self, key, mapping):
-        self._ops.append(lambda: self._client.hashes.setdefault(key, {}).update(mapping))
-
-    def expire(self, key, seconds):
-        self._ops.append(lambda: self._client.ttls.__setitem__(key, seconds))
-
-    def execute(self):
-        for op in self._ops:
-            op()
+from tests.support.fake_redis import FakeRedis
 
 
 @pytest.fixture()

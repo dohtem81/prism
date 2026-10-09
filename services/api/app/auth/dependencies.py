@@ -43,18 +43,43 @@ def _encode_token(subject: str, token_type: str, ttl: timedelta) -> tuple[str, s
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM), jti, int(ttl.total_seconds())
 
 
-def create_access_token(subject: str) -> str:
-    token, _, _ = _encode_token(subject, ACCESS, timedelta(minutes=settings.access_token_ttl_minutes))
+def _service_unavailable() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Token service unavailable")
+
+
+def _issue_access(subject: str, refresh_jti: str | None = None) -> str:
+    token, jti, ttl_seconds = _encode_token(subject, ACCESS, timedelta(minutes=settings.access_token_ttl_minutes))
+    try:
+        token_store.create_session(subject, jti, ACCESS, ttl_seconds, refresh_jti=refresh_jti)
+    except TokenStoreUnavailable as exc:
+        raise _service_unavailable() from exc
+    security_events.record(events.SESSION_CREATED, reason="access_token_issued", user_id=subject)
     return token
 
 
-def create_refresh_token(subject: str) -> str:
+def _issue_refresh(subject: str) -> tuple[str, str]:
     token, jti, ttl_seconds = _encode_token(subject, REFRESH, timedelta(days=settings.refresh_token_ttl_days))
     try:
         token_store.store_refresh(jti, subject, ttl_seconds)
+        token_store.create_session(subject, jti, REFRESH, ttl_seconds)
     except TokenStoreUnavailable as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Token service unavailable") from exc
-    return token
+        raise _service_unavailable() from exc
+    security_events.record(events.SESSION_CREATED, reason="refresh_token_issued", user_id=subject)
+    return token, jti
+
+
+def create_access_token(subject: str) -> str:
+    return _issue_access(subject)
+
+
+def create_refresh_token(subject: str) -> str:
+    return _issue_refresh(subject)[0]
+
+
+def issue_token_pair(subject: str) -> tuple[str, str]:
+    """Issue (access, refresh) for one login; the access session records its refresh jti so logout can end both."""
+    refresh_token, refresh_jti = _issue_refresh(subject)
+    return _issue_access(subject, refresh_jti=refresh_jti), refresh_token
 
 
 def decode_token(token: str, expected_type: str, *, verify_exp: bool = True) -> dict:
@@ -92,6 +117,7 @@ def resolve_authenticated_user_id(token: str) -> str:
     if revoked:
         raise _reject("revoked", user_id=payload["sub"], detail="Token revoked")
 
+    token_store.touch_session(payload["sub"], payload["jti"])
     return str(payload["sub"])
 
 
@@ -105,37 +131,72 @@ def rotate_refresh_token(refresh_token: str) -> tuple[str, str, str]:
         raise _reject("token_store_unavailable", user_id=payload["sub"], detail="Unable to verify token") from exc
 
     if state == RefreshState.REUSED:
-        security_events.record(events.TOKEN_REUSED, reason="refresh_token_reused", user_id=payload["sub"])
+        _handle_refresh_reuse(str(payload["sub"]))
         raise _unauthorized("Token revoked")
+    if state == RefreshState.REVOKED:
+        raise _reject("refresh_revoked", user_id=payload["sub"], detail="Token revoked")
     if state != RefreshState.OK or stored_user_id != payload["sub"]:
         raise _reject("refresh_not_registered", user_id=payload["sub"])
 
     user_id = str(payload["sub"])
-    return create_access_token(user_id), create_refresh_token(user_id), user_id
+    try:
+        token_store.end_session(user_id, payload["jti"])
+    except TokenStoreUnavailable as exc:
+        raise _reject("token_store_unavailable", user_id=user_id, detail="Unable to verify token") from exc
+    security_events.record(events.SESSION_REVOKED, reason="refresh_rotated", user_id=user_id)
+
+    access_token, new_refresh_token = issue_token_pair(user_id)
+    return access_token, new_refresh_token, user_id
+
+
+def _handle_refresh_reuse(user_id: str) -> None:
+    """A rotated refresh token was replayed: treat the account as compromised and revoke every session."""
+    security_events.record(events.TOKEN_REUSED, reason="refresh_token_reused", user_id=user_id)
+    try:
+        revoked = token_store.revoke_all_sessions(user_id, reason="refresh_token_reuse")
+    except TokenStoreUnavailable:
+        security_events.record(events.AUTH_REJECTED, reason="session_revocation_unavailable", user_id=user_id)
+        return
+    security_events.record(
+        events.ALL_SESSIONS_REVOKED, reason=f"refresh_token_reuse:{revoked}_sessions", user_id=user_id
+    )
 
 
 def revoke_session_tokens(access_token: str | None, refresh_token: str | None) -> None:
     """Revoke whichever of the two tokens are valid (signature checked, expiry ignored)."""
     revoked_any = False
     user_id: str | None = None
+    sessions_ended = 0
     try:
         if access_token:
             payload = decode_token(access_token, ACCESS, verify_exp=False)
             user_id = payload["sub"]
+            session = token_store.get_session(user_id, payload["jti"])
             remaining = _remaining_seconds(payload)
             if remaining > 0:
                 token_store.revoke(payload["jti"], remaining)
+            token_store.end_session(user_id, payload["jti"])
+            sessions_ended += 1
+            linked_refresh = (session or {}).get("refresh_jti")
+            if linked_refresh:
+                token_store.invalidate_refresh(linked_refresh)
+                token_store.end_session(user_id, linked_refresh)
+                sessions_ended += 1
             revoked_any = True
         if refresh_token:
             payload = decode_token(refresh_token, REFRESH, verify_exp=False)
             user_id = payload["sub"]
             token_store.invalidate_refresh(payload["jti"])
+            token_store.end_session(user_id, payload["jti"])
+            sessions_ended += 1
             revoked_any = True
     except TokenStoreUnavailable as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Token service unavailable") from exc
+        raise _service_unavailable() from exc
 
     if not revoked_any:
         raise _reject("logout_without_token")
+    token_store.record_revocation(user_id, "logout", sessions_ended)
+    security_events.record(events.SESSION_REVOKED, reason="logout", user_id=user_id)
     security_events.record(events.LOGOUT, reason="user_logout", user_id=user_id)
 
 

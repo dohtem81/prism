@@ -13,8 +13,17 @@ AUTH_REJECTED = "auth_rejected"
 MEMBERSHIP_DENIED = "membership_denied"
 TOKEN_REUSED = "token_reused"
 LOGOUT = "logout"
+SESSION_CREATED = "session_created"
+SESSION_REVOKED = "session_revoked"
+ALL_SESSIONS_REVOKED = "all_sessions_revoked_for_user"
 
-# Only these count as violations; LOGOUT is logged for the audit trail but not counted.
+_EVENT_LEVELS = {
+    LOGOUT: logging.INFO,
+    SESSION_CREATED: logging.DEBUG,
+    SESSION_REVOKED: logging.INFO,
+}
+
+# Only these count as violations; session lifecycle events are logged but not counted.
 VIOLATION_EVENTS = frozenset({AUTH_REJECTED, MEMBERSHIP_DENIED, TOKEN_REUSED})
 
 BY_EVENT_KEY = "auth:violations:by_event"
@@ -45,7 +54,7 @@ class SecurityEvents:
         room_id: str | None = None,
     ) -> None:
         # Never pass tokens or secrets here; reason is a short machine-readable code.
-        level = logging.INFO if event == LOGOUT else logging.WARNING
+        level = _EVENT_LEVELS.get(event, logging.WARNING)
         logger.log(
             level,
             event,

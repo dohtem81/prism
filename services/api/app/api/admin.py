@@ -8,6 +8,7 @@ from services.api.app.analytics.metrics import build_room_metrics_summary
 from services.api.app.auth import security_events as events
 from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.auth.security_events import security_events
+from services.api.app.auth.token_store import token_store
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
 from shared.db.models import Room, RoomMember, TranslationTelemetry
@@ -31,6 +32,15 @@ def get_auth_violations(
 ) -> dict[str, object]:
     """Same shape as the rate-limit summary; `by_scope` holds counts per security event type."""
     return security_events.get_violation_summary(top_n=top_n)
+
+
+@router.get("/auth/sessions")
+def get_auth_sessions(
+    top_n: int = Query(default=10, ge=1, le=100),
+    current_user_id: str = Depends(get_current_user_id),
+) -> dict[str, object]:
+    """Active session counts (one per live refresh token) and recent revocations / reuse detections."""
+    return token_store.get_session_overview(top_n=top_n)
 
 
 @router.get("/rooms/{room_id}/metrics")
