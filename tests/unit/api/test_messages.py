@@ -74,7 +74,7 @@ def test_send_message_persists_and_enqueues(celery_client_mock: MagicMock) -> No
     assert response.version == 1
     assert response.message_id.startswith("msg_")
 
-    assert db.add.call_count == 3
+    assert db.add.call_count == 4
     db.commit.assert_called_once()
     celery_client_mock.send_task.assert_called_once()
 

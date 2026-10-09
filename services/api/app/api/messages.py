@@ -14,7 +14,8 @@ from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
 from services.api.app.infra.settings import settings
 from services.api.app.realtime.websocket_gateway import manager
-from shared.db.models import Message, OutboxEvent, Room, RoomEvent, RoomMember
+from shared.db.models import Message, MessageReceipt, OutboxEvent, Room, RoomEvent, RoomMember
+from shared.receipts import compute_message_receipts
 from shared.schemas.message_events import SendMessage, SendMessageResponse
 from shared.tracing import get_trace_id, start_span
 
@@ -102,6 +103,11 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
         version=1,
         created_at=created_at,
     )
+    receipts = compute_message_receipts(db, payload.room_id, [message]).get(message.id, {"seen": [], "unseen": []})
+    author_display_name = next(
+        (entry["display_name"] for entry in receipts["seen"] if entry["user_id"] == message.author_user_id),
+        None,
+    )
 
     message_created_payload = {
         "event_id": event_id,
@@ -115,11 +121,13 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
             "message_id": message.id,
             "version": message.version,
             "author_user_id": message.author_user_id,
+            "author_display_name": author_display_name,
             "source_lang": message.source_lang,
             "content_original": message.content_original,
             "translations": {},
             "status": message.status,
             "created_at": created_at.isoformat(),
+            "receipts": receipts,
         },
     }
 
@@ -143,6 +151,7 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
 
     try:
         db.add(message)
+        db.add(MessageReceipt(message_id=message.id, user_id=message.author_user_id, seen_at=created_at))
         db.add(room_event)
         db.add(outbox_event)
         outbox_event.status = "processed"
@@ -186,6 +195,9 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
         )
 
     manager.publish_room_event(message.room_id, message_created_payload)
+    if should_enqueue_translation:
+        for entry in receipts["unseen"]:
+            manager.publish_user_event(entry["user_id"], {"type": "RoomUnreadHint", "room_id": message.room_id})
     logger.info(
         "message_created",
         extra={

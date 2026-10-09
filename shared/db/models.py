@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -86,6 +86,28 @@ class MessageTranslation(Base):
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     quality_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
     translated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class LanguageFlag(Base):
+    """Flag image cached from the online source, keyed by normalized language code."""
+
+    __tablename__ = "language_flags"
+
+    lang: Mapped[str] = mapped_column(String(16), primary_key=True)
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    image: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class MessageReceipt(Base):
+    __tablename__ = "message_receipts"
+    __table_args__ = (UniqueConstraint("message_id", "user_id", name="uq_message_receipts_msg_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[str] = mapped_column(String(64), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class RoomEvent(Base):

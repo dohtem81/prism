@@ -26,6 +26,8 @@ class ConnectionManager:
         self._user_connections: DefaultDict[str, set[WebSocket]] = defaultdict(set)
         self._redis_listeners: set[str] = set()
         self._redis_listener_tasks: set[asyncio.Task[None]] = set()
+        self._user_event_sockets: DefaultDict[str, set[WebSocket]] = defaultdict(set)
+        self._user_event_listeners: set[str] = set()
 
     def active_connection_count(self, user_id: str) -> int:
         return len(self._user_connections.get(user_id, set()))
@@ -91,6 +93,58 @@ class ConnectionManager:
     def publish_room_event(self, room_id: str, payload: dict) -> None:
         redis_client.publish(f"room:{room_id}:events", json.dumps(payload))
 
+    def publish_user_event(self, user_id: str, payload: dict) -> None:
+        redis_client.publish(f"user:{user_id}:events", json.dumps(payload))
+
+    async def connect_user_events(self, websocket: WebSocket, user_id: str) -> None:
+        await websocket.accept()
+        self._user_event_sockets[user_id].add(websocket)
+
+    def disconnect_user_events(self, websocket: WebSocket, user_id: str) -> None:
+        self._user_event_sockets[user_id].discard(websocket)
+        if not self._user_event_sockets[user_id]:
+            del self._user_event_sockets[user_id]
+
+    async def ensure_user_event_listener(self, user_id: str) -> None:
+        if user_id in self._user_event_listeners:
+            return
+
+        self._user_event_listeners.add(user_id)
+
+        async def _listen_for_user_events() -> None:
+            try:
+                # Re-subscribe after redis errors; stop once the user has no sockets left.
+                while self._user_event_sockets.get(user_id):
+                    pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
+                    try:
+                        pubsub.subscribe(f"user:{user_id}:events")
+                        while self._user_event_sockets.get(user_id):
+                            message = await asyncio.to_thread(pubsub.get_message, timeout=1)
+                            if not message or message.get("type") != "message":
+                                continue
+                            data = message.get("data")
+                            if not isinstance(data, str):
+                                continue
+                            try:
+                                payload = json.loads(data)
+                            except (TypeError, ValueError):
+                                continue
+                            for websocket in list(self._user_event_sockets.get(user_id, set())):
+                                try:
+                                    await websocket.send_json(payload)
+                                except Exception:
+                                    self.disconnect_user_events(websocket, user_id)
+                    except Exception:
+                        await asyncio.sleep(1)
+                    finally:
+                        pubsub.close()
+            finally:
+                self._user_event_listeners.discard(user_id)
+
+        task = asyncio.create_task(_listen_for_user_events())
+        self._redis_listener_tasks.add(task)
+        task.add_done_callback(self._redis_listener_tasks.discard)
+
     async def broadcast(self, room_id: str, payload: dict) -> None:
         sockets = list(self._connections.get(room_id, set()))
         for websocket in sockets:
@@ -103,6 +157,8 @@ class ConnectionManager:
         self._connections.clear()
         self._user_connections.clear()
         self._redis_listeners.clear()
+        self._user_event_sockets.clear()
+        self._user_event_listeners.clear()
         for task in list(self._redis_listener_tasks):
             task.cancel()
         self._redis_listener_tasks.clear()
@@ -118,6 +174,23 @@ def _resolve_user_id(token: str | None) -> str:
         return resolve_authenticated_user_id(token)
     except Exception as exc:
         raise ValueError("Invalid token") from exc
+
+
+@router.websocket("/ws/user")
+async def user_events_gateway(websocket: WebSocket, token: str | None = Query(default=None)) -> None:
+    try:
+        resolved_user_id = _resolve_user_id(token)
+    except ValueError:
+        await websocket.close(code=1008)
+        return
+
+    await manager.connect_user_events(websocket, resolved_user_id)
+    await manager.ensure_user_event_listener(resolved_user_id)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect_user_events(websocket, resolved_user_id)
 
 
 @router.websocket("/ws/{room_id}")

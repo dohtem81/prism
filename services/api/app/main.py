@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 
 from services.api.app.api.admin import router as admin_router
 from services.api.app.api.auth import router as auth_router
+from services.api.app.api.flags import router as flags_router
 from services.api.app.api.health import router as health_router
 from services.api.app.api.messages import router as messages_router
 from services.api.app.api.rooms import router as rooms_router
@@ -58,6 +59,7 @@ app.include_router(messages_router)
 app.include_router(rooms_router)
 app.include_router(users_router)
 app.include_router(admin_router)
+app.include_router(flags_router)
 app.include_router(websocket_router)
 app.include_router(ui_router)
 app.include_router(root_router)

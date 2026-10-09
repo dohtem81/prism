@@ -33,6 +33,8 @@ class RoomSummary(BaseModel):
     preferred_lang: str
     default_translation_mode: str
     created_at: datetime
+    has_unread: bool = False
+    unread_count: int = 0
 
 
 class RoomMembershipResponse(BaseModel):
@@ -50,12 +52,33 @@ class RoomMessageTranslation(BaseModel):
     translated_at: datetime | None = None
 
 
+class MessageReceiptUser(BaseModel):
+    user_id: str
+    display_name: str | None = None
+    seen_at: datetime | None = None
+
+
+class MessageReceipts(BaseModel):
+    seen: list[MessageReceiptUser] = []
+    unseen: list[MessageReceiptUser] = []
+
+
+class MarkSeenRequest(BaseModel):
+    message_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class MarkSeenResponse(BaseModel):
+    marked: int
+
+
 class RoomMessageResponse(BaseModel):
     message_id: str
     version: int
     author_user_id: str
+    author_display_name: str | None = None
     source_lang: str
     content_original: str
     status: str
     created_at: datetime
     translations: dict[str, RoomMessageTranslation] = {}
+    receipts: MessageReceipts = MessageReceipts()

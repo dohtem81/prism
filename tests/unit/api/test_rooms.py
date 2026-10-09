@@ -342,3 +342,37 @@ def test_message_is_after_anchor_uses_id_tiebreaker_for_same_timestamp() -> None
 
     assert _message_is_after_anchor(newer_message, anchor) is True
     assert _message_is_after_anchor(older_same_time_message, anchor) is False
+
+
+def test_delete_room_rejects_non_admin() -> None:
+    from services.api.app.api.rooms import delete_room
+
+    db = MagicMock()
+    db.get.return_value = Room(id="room_1", name="Alpha", default_translation_mode="balanced", created_at=datetime.now(timezone.utc))
+    db.scalar.return_value = RoomMember(room_id="room_1", user_id="user_2", role="member", preferred_lang="en")
+
+    with pytest.raises(HTTPException) as exc:
+        delete_room("room_1", db=db, current_user_id="user_2")
+
+    assert exc.value.status_code == 403
+    db.delete.assert_not_called()
+
+
+def test_delete_room_removes_room_for_admin() -> None:
+    from unittest.mock import patch
+
+    from services.api.app.api.rooms import delete_room
+
+    db = MagicMock()
+    room = Room(id="room_1", name="Alpha", default_translation_mode="balanced", created_at=datetime.now(timezone.utc))
+    db.get.return_value = room
+    db.scalar.return_value = RoomMember(room_id="room_1", user_id="user_1", role="admin", preferred_lang="en")
+    db.execute.return_value.all.return_value = [("user_1",), ("user_2",)]
+
+    with patch("services.api.app.api.rooms.manager") as manager_mock:
+        delete_room("room_1", db=db, current_user_id="user_1")
+
+    db.delete.assert_called_once_with(room)
+    db.commit.assert_called_once()
+    assert manager_mock.publish_room_event.call_args.args[1]["type"] == "RoomDeleted"
+    assert manager_mock.publish_user_event.call_count == 2

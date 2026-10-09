@@ -131,6 +131,7 @@ from shared.db.models import Message, MessageTranslation, OutboxEvent, Room, Roo
 from services.api.app.realtime.websocket_gateway import manager
 from shared.logging_utils import get_correlation_id, get_logger, reset_correlation_id, set_correlation_id
 from shared.metrics import record_translation_metric
+from shared.receipts import compute_message_receipts
 from shared.tracing import reset_trace_context, set_trace_context, start_span
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -396,6 +397,7 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
                 },
                 "translations_patch": translations_patch,
                 "status": message.status,
+                "receipts": compute_message_receipts(db, room_id, [message]).get(message.id, {"seen": [], "unseen": []}),
             }
 
             room_event = RoomEvent(
@@ -420,6 +422,9 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
             db.commit()
 
             manager.publish_room_event(room_id, event_payload)
+            for member in members:
+                if member.preferred_lang in translations_patch and member.user_id != message.author_user_id:
+                    manager.publish_user_event(member.user_id, {"type": "RoomUnreadHint", "room_id": room_id})
         logger.info(
             "translation_batch_completed",
             extra={
