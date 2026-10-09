@@ -43,7 +43,7 @@ Steps 1–5 are unchanged — the message is delivered in the original language 
 8. Worker broadcasts a `MessageUpdated` event to the room.
 9. Clients patch the existing message in place by `message_id`.
 
-> **Note:** Multi-instance Redis pub/sub fan-out is not yet implemented. The current runtime uses a single API replica with in-process broadcast.
+> **Note:** Room events are published to Redis (`room:{room_id}:events`). Every API instance subscribes for rooms it has local WebSocket clients in and delivers only to those clients, so multiple API replicas work.
 
 ## Event Envelope (Realtime)
 

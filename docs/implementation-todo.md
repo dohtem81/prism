@@ -42,7 +42,7 @@ Tracks current task status and next actions.
 | P1-14 | Milestone 3 / 4 | Testing | Add integration test: send message -> queued -> translated | DONE | High | 2026-08-11 | A full send-message-to-translation-update flow test is included in the unit regression suite. |
 | P1-15 | Milestone 6 | Security | Validate input limits and enforce payload size checks | DONE | Medium | 2026-08-16 | `SendMessage` now enforces source language format and payload size bounds (including 4000-char content limit); rate limiting and quotas remain follow-on hardening. |
 | P1-18 | Milestone 5 | History | Build room history API and reconnect replay | DONE | Medium | 2026-08-11 | The room history endpoint and reconnect-safe replay logic are implemented and validated in the live room flow. |
-| P1-19 | Cross-cutting | Architecture | Keep the system single-instance only for now; plan Redis pub/sub multi-replica fanout as a future milestone | TODO | High | 2026-08-30 | Current design is intentionally single-instance for demo/testing simplicity. See docs/single-instance-scaling-deferred-plan.md. |
+| P1-19 | Cross-cutting | Architecture | Redis pub/sub multi-replica fanout for the realtime gateway | DONE | High | 2026-10-09 | All room events (API and worker) are published to `room:{room_id}:events`; each API instance subscribes only for rooms with local WebSocket clients, delivers to its own sockets, releases the subscription when the last local client leaves, and re-subscribes after Redis errors. Single-instance runs use the same path. Covered by `tests/unit/api/test_multi_instance_fanout.py`. Sticky sessions/load-balancer config and worker scaling are out of scope. |
 | P1-20 | Cross-cutting | Security | Add rate limiting, quotas, and abuse protections for message send volume and API usage | DONE | Medium | 2026-08-30 | All 4 plan phases implemented: Redis-backed per-user/per-room rate limits, daily message/translation-job quotas, and admin violation visibility (`GET /v1/admin/rate-limits/violations`). Fails open on Redis errors. See docs/rate-limiting-and-quotas-plan.md. |
 | P1-21 | Milestone 6 | Observability | Add full request tracing and end-to-end distributed tracing beyond basic correlation IDs | DONE | Medium | 2026-08-30 | Lightweight trace context (`shared/tracing.py`) with trace_id/span_id propagates from HTTP requests through Celery into the worker; spans instrument message/room/websocket/admin API handlers and translation task execution (provider call, DLQ, dispatch). Exporter/storage backend remains deferred. See docs/distributed-tracing-plan.md. |
 | P1-22 | Cross-cutting | Operations | Capture load, latency, and performance baselines under realistic traffic | TODO | Medium | 2026-08-30 | No benchmark or load/performance dataset exists yet. See docs/performance-baselines-plan.md. |
@@ -53,12 +53,11 @@ Tracks current task status and next actions.
 
 ## Next up
 
-1. Multi-instance fanout — Redis pub/sub across API replicas (P1-19).
-2. Performance baselines — capture load and latency data under realistic traffic (P1-22).
-3. Multi-tenancy hardening — real tenant boundaries and stronger isolation (P1-23).
-4. Auth/API security hardening beyond basic JWT validation (P1-24) — Phases 1, 2 and 4 done; Phase 3 (session/device visibility) remains.
+1. Performance baselines — capture load and latency data under realistic traffic (P1-22).
+2. Multi-tenancy hardening — real tenant boundaries and stronger isolation (P1-23).
+3. Auth/API security hardening beyond basic JWT validation (P1-24) — Phases 1, 2 and 4 done; Phase 3 (session/device visibility) remains.
 
-> These are the only remaining TODO items in the tracker; all other milestones and cross-cutting tasks are DONE. P1-19 is planned in docs/single-instance-scaling-deferred-plan.md, P1-22 in docs/performance-baselines-plan.md, P1-23 in docs/multi-tenancy-hardening-plan.md, and P1-24 in docs/auth-security-hardening-plan.md.
+> These are the only remaining TODO items in the tracker; all other milestones and cross-cutting tasks are DONE. P1-22 in docs/performance-baselines-plan.md, P1-23 in docs/multi-tenancy-hardening-plan.md, and P1-24 in docs/auth-security-hardening-plan.md.
 
 ---
 
@@ -77,3 +76,4 @@ Tracks current task status and next actions.
 | 2026-10-09 | P1-24 moved to IN_PROGRESS: auth hardening Phase 1 implemented (`dev-token` gated to dev, 30-minute access tokens, default-secret startup warning, explicit CORS, `.env.example` updated) |
 | 2026-10-09 | P1-24 Phase 2 implemented: `jti`/`iat` claims, Redis denylist and single-use rotating refresh tokens, `POST /v1/auth/refresh` and `POST /v1/auth/logout`, fail-closed token validation |
 | 2026-10-09 | P1-24 Phase 4 implemented: structured security events, Redis violation counters, `GET /v1/admin/auth/violations`, CORS production note (Phase 3 still open) |
+| 2026-10-09 | P1-19 DONE: multi-instance realtime fan-out via Redis pub/sub with per-room local subscriptions, cleanup on last disconnect, and re-subscribe on Redis errors |

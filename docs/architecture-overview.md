@@ -39,7 +39,7 @@ flowchart LR
 | `registration` | Standalone FastAPI service for account sign-up (email/username/password) |
 | `postgres` | Durable store for rooms, members, messages, translations, events, and registration accounts |
 | `rabbitmq` | Translation job queue with dead-letter support |
-| `redis` | Translation result cache, registration duplicate-check cache; multi-instance pub/sub fanout is not yet implemented |
+| `redis` | Translation result cache, registration duplicate-check cache, token revocation state, and pub/sub fanout of room events across API replicas |
 
 ---
 

@@ -72,21 +72,27 @@ class ConnectionManager:
         self._redis_listeners.add(room_id)
 
         async def _listen_for_room_events() -> None:
-            pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
             channel = f"room:{room_id}:events"
-            pubsub.subscribe(channel)
             try:
-                while True:
-                    # redis-py's pubsub is sync; run it in a thread so it never blocks the event loop.
-                    message = await asyncio.to_thread(pubsub.get_message, timeout=1)
-                    if not message or message.get("type") != "message":
-                        continue
-                    data = message.get("data")
-                    if isinstance(data, str):
-                        await self._handle_redis_message(room_id, data)
-            except Exception:
+                # Runs only while this instance has local clients in the room; re-subscribes after Redis errors.
+                while self._connections.get(room_id):
+                    pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
+                    try:
+                        pubsub.subscribe(channel)
+                        while self._connections.get(room_id):
+                            # redis-py's pubsub is sync; run it in a thread so it never blocks the event loop.
+                            message = await asyncio.to_thread(pubsub.get_message, timeout=1)
+                            if not message or message.get("type") != "message":
+                                continue
+                            data = message.get("data")
+                            if isinstance(data, str):
+                                await self._handle_redis_message(room_id, data)
+                    except Exception:
+                        await asyncio.sleep(1)
+                    finally:
+                        pubsub.close()
+            finally:
                 self._redis_listeners.discard(room_id)
-                pubsub.close()
 
         task = asyncio.create_task(_listen_for_room_events())
         self._redis_listener_tasks.add(task)
