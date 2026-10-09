@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     jwt_secret: str = "dev-secret"
     access_token_ttl_minutes: int = 30
+    refresh_token_ttl_days: int = 7
+    # Short timeouts so an unreachable Redis rejects requests quickly instead of hanging them.
+    token_store_redis_timeout_seconds: float = 0.5
     # JSON list in env, e.g. CORS_ALLOWED_ORIGINS=["https://app.example.com"]. Never use "*" with credentials.
     cors_allowed_origins: list[str] = ["http://localhost:8000"]
 

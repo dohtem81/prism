@@ -8,5 +8,21 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     user_id: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=4096)
+
+
+class TokenPairResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user_id: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = Field(default=None, max_length=4096)
