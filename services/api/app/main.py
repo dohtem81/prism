@@ -20,6 +20,7 @@ logger = get_logger("prism.api")
 
 app = FastAPI(title=settings.app_name)
 
+# Origins come only from settings; the dev default is localhost, production must override it.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,

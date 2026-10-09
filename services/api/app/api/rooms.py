@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
+from services.api.app.auth import security_events as events
 from services.api.app.auth.dependencies import get_current_user_id
+from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
 from services.api.app.infra.settings import settings
@@ -124,6 +126,12 @@ def upsert_membership(
 
     actor = db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == current_user_id))
     if not actor or actor.role != "admin":
+        security_events.record(
+            events.MEMBERSHIP_DENIED,
+            reason="not_admin" if actor else "not_a_member",
+            user_id=current_user_id,
+            room_id=room_id,
+        )
         raise HTTPException(status_code=403, detail="Only room admins can manage members")
 
     rate_limiter.enforce(
@@ -217,6 +225,9 @@ def list_room_messages(
         )
     )
     if not membership:
+        security_events.record(
+            events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=current_user_id, room_id=room_id
+        )
         raise HTTPException(status_code=403, detail="User is not a room member")
 
     with start_span("api.room.history.replay", room_id=room_id, user_id=current_user_id):
@@ -303,6 +314,12 @@ def delete_room(
 
     actor = db.scalar(select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == current_user_id))
     if not actor or actor.role != "admin":
+        security_events.record(
+            events.MEMBERSHIP_DENIED,
+            reason="not_admin" if actor else "not_a_member",
+            user_id=current_user_id,
+            room_id=room_id,
+        )
         raise HTTPException(status_code=403, detail="Only room admins can delete a room")
 
     member_ids = [row[0] for row in db.execute(select(RoomMember.user_id).where(RoomMember.room_id == room_id)).all()]
@@ -328,6 +345,9 @@ def mark_messages_seen(
         select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == current_user_id)
     )
     if not membership:
+        security_events.record(
+            events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=current_user_id, room_id=room_id
+        )
         raise HTTPException(status_code=403, detail="User is not a room member")
 
     requested_ids = list(dict.fromkeys(payload.message_ids))

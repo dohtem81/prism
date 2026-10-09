@@ -5,7 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi import Depends
 
+from services.api.app.auth import security_events as events
 from services.api.app.auth.dependencies import get_current_user_id
+from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.settings import settings
 from shared.db.models import Room, RoomMember
@@ -73,6 +75,9 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
         )
     )
     if not membership:
+        security_events.record(
+            events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=current_user_id, room_id=room_id
+        )
         raise HTTPException(status_code=403, detail="User is not a room member")
 
     return templates.TemplateResponse(

@@ -8,7 +8,9 @@ from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from services.api.app.auth import security_events as events
 from services.api.app.auth.dependencies import resolve_authenticated_user_id
+from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
 from services.api.app.infra.settings import settings
@@ -169,6 +171,7 @@ manager = ConnectionManager()
 
 def _resolve_user_id(token: str | None) -> str:
     if not token:
+        security_events.record(events.AUTH_REJECTED, reason="missing_credentials")
         raise ValueError("Missing token")
     try:
         return resolve_authenticated_user_id(token)
@@ -218,6 +221,9 @@ async def websocket_gateway(
         )
     )
     if not membership:
+        security_events.record(
+            events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=resolved_user_id, room_id=room_id
+        )
         await websocket.close(code=1008)
         return
 

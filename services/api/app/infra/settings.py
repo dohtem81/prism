@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     refresh_token_ttl_days: int = 7
     # Short timeouts so an unreachable Redis rejects requests quickly instead of hanging them.
     token_store_redis_timeout_seconds: float = 0.5
-    # JSON list in env, e.g. CORS_ALLOWED_ORIGINS=["https://app.example.com"]. Never use "*" with credentials.
+    # Local-dev default only. Production deployments MUST set this explicitly to their real
+    # browser origin(s); JSON list in env, e.g. CORS_ALLOWED_ORIGINS=["https://app.example.com"].
+    # Never use "*" with credentials. Auth is bearer-token only (no cookies, so no CSRF surface).
     cors_allowed_origins: list[str] = ["http://localhost:8000"]
 
     # Base URL the webui uses to reach the standalone registration service from the browser.

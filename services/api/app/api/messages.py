@@ -8,7 +8,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from services.api.app.auth import security_events as events
 from services.api.app.auth.dependencies import get_current_user_id
+from services.api.app.auth.security_events import security_events
 from services.api.app.infra.celery_client import celery_client
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
@@ -43,6 +45,9 @@ def send_message(
         )
     )
     if not membership:
+        security_events.record(
+            events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=current_user_id, room_id=payload.room_id
+        )
         raise HTTPException(status_code=403, detail="User is not a room member")
 
     rate_limiter.enforce(
