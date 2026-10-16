@@ -99,6 +99,11 @@ def test_dashboard_renders_server_authenticated_identity() -> None:
     assert response.status_code == 200
     assert 'const activeUserId = "user_1";' in response.text
     assert "const accessTokenTtlSeconds = 1800;" in response.text
+    assert 'id="logoutButton">Log out</button>' in response.text
+    assert 'id="messageSourceLang"' in response.text
+    assert "source_lang: sourceLang" in response.text
+    assert "No translation needed" in response.text
+    assert "fetch('/v1/auth/logout'" in response.text
     assert "token=" not in response.text
 
 

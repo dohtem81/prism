@@ -126,7 +126,7 @@ docker compose -f deploy/compose/docker-compose.yml up -d postgres rabbitmq redi
 **4. Run database migrations**
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head
+docker compose -f deploy/compose/docker-compose.yml run --build --rm api alembic -c migrations/alembic.ini upgrade head
 ```
 
 **5. Start the application services**
@@ -201,7 +201,7 @@ This creates a demo user, a demo room, and an admin membership so you can start 
 | Start (detached) | `docker compose -f deploy/compose/docker-compose.yml up --build -d` |
 | Stop | `docker compose -f deploy/compose/docker-compose.yml down` |
 | Stop + wipe volumes | `docker compose -f deploy/compose/docker-compose.yml down -v` |
-| Run migrations | `docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head` |
+| Run migrations | `docker compose -f deploy/compose/docker-compose.yml run --build --rm api alembic -c migrations/alembic.ini upgrade head` |
 | Run tests | `docker compose -f deploy/compose/docker-compose.yml run --rm tests` |
 | API logs | `docker compose -f deploy/compose/docker-compose.yml logs -f api` |
 | Worker logs | `docker compose -f deploy/compose/docker-compose.yml logs -f worker` |
@@ -210,9 +210,9 @@ This creates a demo user, a demo room, and an admin membership so you can start 
 **Creating a new migration after schema changes:**
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml run --rm api \
+docker compose -f deploy/compose/docker-compose.yml run --build --rm api \
   alembic -c migrations/alembic.ini revision --autogenerate -m "describe_change"
-docker compose -f deploy/compose/docker-compose.yml run --rm api \
+docker compose -f deploy/compose/docker-compose.yml run --build --rm api \
   alembic -c migrations/alembic.ini upgrade head
 ```
 

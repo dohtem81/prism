@@ -30,7 +30,13 @@ def test_send_message_broadcasts_original_message_and_translation_payload_shape(
     app.dependency_overrides[get_db] = lambda: websocket_db
 
     try:
-        with patch("services.api.app.api.messages.celery_client") as celery_client_mock:
+        with (
+            patch("services.api.app.api.messages.celery_client") as celery_client_mock,
+            patch("services.api.app.api.messages.dispatch_outbox_ids") as dispatch_mock,
+        ):
+            dispatch_mock.side_effect = lambda db, ids, **kwargs: {
+                "processed": len(ids), "processed_ids": ids, "failed": 0
+            }
             db = MagicMock()
             room = MagicMock()
             room.id = "room_1"
@@ -48,6 +54,6 @@ def test_send_message_broadcasts_original_message_and_translation_payload_shape(
             response = send_message(_payload(), db=db, current_user_id="user_1")
 
             assert response.message_id.startswith("msg_")
-            assert celery_client_mock.send_task.called
+            assert dispatch_mock.call_args.kwargs["send_task"] is celery_client_mock.send_task
     finally:
         app.dependency_overrides.clear()

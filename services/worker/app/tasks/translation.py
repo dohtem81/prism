@@ -9,8 +9,8 @@ from uuid import uuid4
 
 from openai import OpenAI
 import redis
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 
 class TranslationProvider:
@@ -126,16 +126,15 @@ def build_translation_provider(
     return provider_cls(model=selected_model_name)
 
 from services.worker.app.celery_app import celery_app
+from services.worker.app.infra.db import SessionLocal
 from services.worker.app.infra.settings import settings
 from shared.db.models import Message, MessageTranslation, OutboxEvent, Room, RoomEvent, RoomMember, TranslationTelemetry
 from services.api.app.realtime.websocket_gateway import manager
 from shared.logging_utils import get_correlation_id, get_logger, reset_correlation_id, set_correlation_id
 from shared.metrics import record_translation_metric
+from shared.outbox_dispatcher import dispatch_outbox_ids
 from shared.receipts import compute_message_receipts
 from shared.tracing import reset_trace_context, set_trace_context, start_span
-
-engine = create_engine(settings.database_url, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, decode_responses=True)
 logger = get_logger("prism.worker.translation")
@@ -227,19 +226,16 @@ def run_translation_task(message_id: str, room_id: str, source_lang: str, conten
 
 def _run_translation_task(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
     with SessionLocal() as db:
-        message = db.scalar(select(Message).where(Message.id == message_id))
+        message = db.scalar(select(Message).where(Message.id == message_id).with_for_update())
         room = db.scalar(select(Room).where(Room.id == room_id))
         if not message or not room:
             return {"message_id": message_id, "status": "not_found"}
+        if message.status != "original_only":
+            return {"message_id": message_id, "status": message.status}
 
         members = db.scalars(select(RoomMember).where(RoomMember.room_id == room_id)).all()
         target_langs = sorted({m.preferred_lang for m in members if m.preferred_lang != source_lang})
-
-        if not target_langs:
-            message.status = "translated"
-            message.version += 1
-            db.commit()
-            return {"message_id": message_id, "status": "no_target_languages"}
+        no_target_languages = not target_langs
 
         translations_patch: dict[str, dict[str, str]] = {}
         success_count = 0
@@ -412,7 +408,14 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
                 aggregate_type="message",
                 aggregate_id=message.id,
                 event_type="MessageUpdated",
-                payload=event_payload,
+                payload={
+                    "room_event": event_payload,
+                    "user_hints": [
+                        member.user_id
+                        for member in members
+                        if member.preferred_lang in translations_patch and member.user_id != message.author_user_id
+                    ],
+                },
                 status="pending",
                 created_at=occurred_at,
             )
@@ -421,10 +424,13 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
             db.add(outbox_event)
             db.commit()
 
-            manager.publish_room_event(room_id, event_payload)
-            for member in members:
-                if member.preferred_lang in translations_patch and member.user_id != message.author_user_id:
-                    manager.publish_user_event(member.user_id, {"type": "RoomUnreadHint", "room_id": room_id})
+            dispatch_outbox_ids(
+                db,
+                [outbox_event.id],
+                send_task=celery_app.send_task,
+                publish_room_event=manager.publish_room_event,
+                publish_user_event=manager.publish_user_event,
+            )
         logger.info(
             "translation_batch_completed",
             extra={
@@ -440,7 +446,7 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
         return {
             "message_id": message_id,
             "room_id": room_id,
-            "status": message.status,
+            "status": "no_target_languages" if no_target_languages else message.status,
             "successful_translations": str(success_count),
             "failed_translations": str(failure_count),
             "translations_patch": json.dumps(translations_patch),

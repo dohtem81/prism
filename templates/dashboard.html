@@ -110,6 +110,12 @@
         padding: 12px 14px;
         font-size: 1rem;
       }
+      .composer .source-lang-input {
+        flex: 0 0 58px;
+        text-align: center;
+        padding-left: 6px;
+        padding-right: 6px;
+      }
       .composer button {
         background: var(--accent-strong);
         color: white;
@@ -438,6 +444,23 @@
         gap: 20px;
         flex-wrap: wrap;
       }
+      .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .logout-button {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid rgba(148,163,184,0.3);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .logout-button:hover { background: rgba(148,163,184,0.12); }
+      .logout-button:disabled { opacity: 0.6; cursor: wait; }
       .member-inline form {
         flex-direction: row;
       }
@@ -528,8 +551,12 @@
             </div>
             <button id="deleteRoomButton" class="danger-button" style="display: none;">Delete room</button>
           </div>
-          <div class="status-pill" id="roomStatus">Ready</div>
+          <div class="topbar-actions">
+            <div class="status-pill" id="roomStatus">Ready</div>
+            <button type="button" class="logout-button" id="logoutButton">Log out</button>
+          </div>
         </div>
+        <div id="logoutNote" class="form-note" role="status" aria-live="polite"></div>
 
         <section class="panel stats-panel" id="statsPanel" style="display: none;">
           <h3>Room stats (owner view)</h3>
@@ -540,6 +567,7 @@
           <div id="feed" class="feed"></div>
           <div id="sendNote" class="form-note"></div>
           <div class="composer">
+            <input id="messageSourceLang" class="source-lang-input" type="text" value="en" required minlength="2" maxlength="2" pattern="[a-z]{2}" aria-label="Message language" title="Two-letter source language" />
             <input id="messageInput" type="text" placeholder="Type a message…" />
             <label class="autoscroll-toggle">
               <input type="checkbox" id="autoScrollToggle" /> Follow latest
@@ -614,7 +642,10 @@
       const roomStatus = document.getElementById('roomStatus');
       const connectionState = document.getElementById('connectionState');
       const messageInput = document.getElementById('messageInput');
+      const messageSourceLangInput = document.getElementById('messageSourceLang');
       const sendButton = document.getElementById('sendButton');
+      const logoutButton = document.getElementById('logoutButton');
+      const logoutNote = document.getElementById('logoutNote');
       const sendNote = document.getElementById('sendNote');
       const createRoomForm = document.getElementById('createRoomForm');
       const createRoomNote = document.getElementById('createRoomNote');
@@ -633,7 +664,31 @@
       const addMemberNote = document.getElementById('addMemberNote');
       const deleteRoomButton = document.getElementById('deleteRoomButton');
 
+      logoutButton.addEventListener('click', async () => {
+        logoutButton.disabled = true;
+        logoutNote.textContent = '';
+        try {
+          const response = await fetch('/v1/auth/logout', {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || 'Could not log out. Please try again.');
+          }
+          if (state.socket) {
+            state.socket.onclose = null;
+            state.socket.close();
+          }
+          window.location.replace('/ui/login');
+        } catch (error) {
+          logoutNote.textContent = error.message || 'Could not log out. Please try again.';
+          logoutButton.disabled = false;
+        }
+      });
+
       ownUserId.textContent = activeUserId;
+      messageSourceLangInput.value = roomPreferredLang || 'en';
 
       const autoScrollToggle = document.getElementById('autoScrollToggle');
       autoScrollToggle.checked = localStorage.getItem('prism:autoscroll') === '1';
@@ -753,7 +808,14 @@
           card.appendChild(buildReceiptsPopover(message));
           if (isUnseenForMe(message)) seenObserver.observe(card);
 
-          const badge = STATUS_BADGES[message.status] || STATUS_BADGES.original_only;
+          let badge = STATUS_BADGES[message.status] || STATUS_BADGES.original_only;
+          if (
+            message.status === 'translated' &&
+            roomPreferredLang === message.source_lang &&
+            !Object.keys(message.translations || {}).length
+          ) {
+            badge = { className: 'translated', label: 'No translation needed' };
+          }
           const header = document.createElement('div');
           header.className = 'message-header';
           const authorEl = document.createElement('span');
@@ -939,13 +1001,18 @@
         if (!roomId) return;
         const content = messageInput.value.trim();
         if (!content) return;
+        const sourceLang = messageSourceLangInput.value.trim().toLowerCase();
+        if (!/^[a-z]{2}$/.test(sourceLang)) {
+          messageSourceLangInput.reportValidity();
+          return;
+        }
 
         sendNote.textContent = '';
         const payload = {
           author_user_id: activeUserId,
           room_id: roomId,
           client_message_id: `ui-${Date.now()}`,
-          source_lang: 'en',
+          source_lang: sourceLang,
           content_original: content,
         };
 

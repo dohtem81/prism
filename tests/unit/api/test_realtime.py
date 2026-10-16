@@ -10,6 +10,7 @@ from services.api.app.auth.dependencies import ACCESS_COOKIE_NAME, create_access
 from services.api.app.infra.db import get_db
 from services.api.app.main import app
 from services.api.app.realtime.websocket_gateway import _resolve_user_id, manager
+from shared.db.models import OutboxEvent
 from shared.schemas.message_events import SendMessage
 
 
@@ -47,7 +48,23 @@ def test_message_broadcasts_to_room_websocket_subscribers() -> None:
                 room.id = "room_1"
                 member = MagicMock()
                 member.user_id = "user_1"
-                db.scalar.side_effect = [room, member, 7]
+                initial_scalar_results = iter([room, member, 7])
+                outbox_rows = {}
+                dispatch_ids = iter([1, 2])
+
+                def _scalar(_statement):
+                    try:
+                        return next(initial_scalar_results)
+                    except StopIteration:
+                        return outbox_rows[next(dispatch_ids)]
+
+                def _add(instance):
+                    if isinstance(instance, OutboxEvent):
+                        instance.id = len(outbox_rows) + 1
+                        outbox_rows[instance.id] = instance
+
+                db.scalar.side_effect = _scalar
+                db.add.side_effect = _add
 
                 created_at = datetime.now(timezone.utc)
 
@@ -96,7 +113,23 @@ def test_message_send_and_translation_flow_are_enqueued_and_updated() -> None:
                 room.id = "room_1"
                 member = MagicMock()
                 member.user_id = "user_1"
-                db.scalar.side_effect = [room, member, 7]
+                initial_scalar_results = iter([room, member, 7])
+                outbox_rows = {}
+                dispatch_ids = iter([1, 2])
+
+                def _scalar(_statement):
+                    try:
+                        return next(initial_scalar_results)
+                    except StopIteration:
+                        return outbox_rows[next(dispatch_ids)]
+
+                def _add(instance):
+                    if isinstance(instance, OutboxEvent):
+                        instance.id = len(outbox_rows) + 1
+                        outbox_rows[instance.id] = instance
+
+                db.scalar.side_effect = _scalar
+                db.add.side_effect = _add
                 created_at = datetime.now(timezone.utc)
                 db.refresh.side_effect = lambda msg: setattr(msg, "created_at", created_at)
 

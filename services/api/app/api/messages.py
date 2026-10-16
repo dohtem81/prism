@@ -19,6 +19,7 @@ from services.api.app.realtime.websocket_gateway import manager
 from shared.db.models import Message, MessageReceipt, OutboxEvent, Room, RoomEvent, RoomMember
 from shared.receipts import compute_message_receipts
 from shared.schemas.message_events import SendMessage, SendMessageResponse
+from shared.outbox_dispatcher import dispatch_outbox_ids
 from shared.tracing import get_trace_id, start_span
 
 router = APIRouter(prefix="/v1/messages", tags=["messages"])
@@ -149,7 +150,26 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
         aggregate_type="message",
         aggregate_id=message.id,
         event_type="MessageCreated",
-        payload=message_created_payload,
+        payload={"room_event": message_created_payload},
+        status="pending",
+        created_at=created_at,
+    )
+    translation_outbox_event = OutboxEvent(
+        aggregate_type="message",
+        aggregate_id=message.id,
+        event_type="TranslationRequested",
+        payload={
+            "task_name": "services.worker.app.tasks.translation.translate_message",
+            "queue": "translation.requested.q",
+            "kwargs": {
+                "message_id": message.id,
+                "room_id": message.room_id,
+                "source_lang": message.source_lang,
+                "content_original": message.content_original,
+                "correlation_id": get_correlation_id(),
+                "trace_id": get_trace_id(),
+            },
+        },
         status="pending",
         created_at=created_at,
     )
@@ -159,8 +179,7 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
         db.add(MessageReceipt(message_id=message.id, user_id=message.author_user_id, seen_at=created_at))
         db.add(room_event)
         db.add(outbox_event)
-        outbox_event.status = "processed"
-        outbox_event.processed_at = created_at
+        db.add(translation_outbox_event)
         db.commit()
         db.refresh(message)
     except IntegrityError:
@@ -177,19 +196,17 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
         message = existing
         should_enqueue_translation = False
 
+    translation_job_enqueued = False
     if should_enqueue_translation:
-        celery_client.send_task(
-            "services.worker.app.tasks.translation.translate_message",
-            kwargs={
-                "message_id": message.id,
-                "room_id": message.room_id,
-                "source_lang": message.source_lang,
-                "content_original": message.content_original,
-                "correlation_id": get_correlation_id(),
-                "trace_id": get_trace_id(),
-            },
-            queue="translation.requested.q",
+        dispatch_result = dispatch_outbox_ids(
+            db,
+            [outbox_event.id, translation_outbox_event.id],
+            send_task=celery_client.send_task,
+            publish_room_event=manager.publish_room_event,
+            publish_user_event=manager.publish_user_event,
         )
+        translation_job_enqueued = translation_outbox_event.id in dispatch_result["processed_ids"]
+    if translation_job_enqueued:
         logger.info(
             "message_queued_for_translation",
             extra={
@@ -199,10 +216,6 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
             },
         )
 
-    manager.publish_room_event(message.room_id, message_created_payload)
-    if should_enqueue_translation:
-        for entry in receipts["unseen"]:
-            manager.publish_user_event(entry["user_id"], {"type": "RoomUnreadHint", "room_id": message.room_id})
     logger.info(
         "message_created",
         extra={
@@ -217,6 +230,6 @@ def _create_message(payload: SendMessage, db: Session, current_user_id: str) -> 
         room_id=message.room_id,
         status=message.status,
         version=message.version,
-        translation_job_enqueued=should_enqueue_translation,
+        translation_job_enqueued=translation_job_enqueued,
         created_at=message.created_at,
     )
