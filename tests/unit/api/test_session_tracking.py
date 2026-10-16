@@ -1,10 +1,12 @@
 import logging
 from datetime import datetime, timedelta, timezone
+from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from fastapi import Response
 from fastapi.testclient import TestClient
 from jose import jwt
 
@@ -14,6 +16,8 @@ from services.api.app.auth import dependencies
 from services.api.app.auth import security_events as events
 from services.api.app.auth.dependencies import (
     ALGORITHM,
+    ACCESS_COOKIE_NAME,
+    REFRESH_COOKIE_NAME,
     issue_token_pair,
     resolve_authenticated_user_id,
 )
@@ -54,17 +58,24 @@ def _refresh(client: TestClient, refresh_token: str):
 
 
 def test_login_creates_access_and_refresh_sessions(store) -> None:
-    account = SimpleNamespace(id="user_1", password_hash="hash")
+    account = SimpleNamespace(id="user_1", password_hash="hash", must_change_password=False)
     db = MagicMock()
     db.scalar.return_value = account
+    cookie_response = Response()
 
     with patch("services.api.app.api.auth.verify_password", return_value=True):
-        response = login(LoginRequest(username_or_email="user_1", password="pw"), db=db)
+        response = login(LoginRequest(username_or_email="user_1", password="pw"), response=cookie_response, db=db)
+
+    cookies = SimpleCookie()
+    for header in cookie_response.headers.getlist("set-cookie"):
+        cookies.load(header)
+    access_token = cookies["prism_access"].value
+    refresh_token = cookies["prism_refresh"].value
 
     sessions = {s["token_type"]: s for s in store.list_active_sessions("user_1")}
     assert set(sessions) == {"access", "refresh"}
-    assert sessions["access"]["jti"] == _claims(response.access_token)["jti"]
-    assert sessions["refresh"]["jti"] == _claims(response.refresh_token)["jti"]
+    assert sessions["access"]["jti"] == _claims(access_token)["jti"]
+    assert sessions["refresh"]["jti"] == _claims(refresh_token)["jti"]
     assert sessions["access"]["refresh_jti"] == sessions["refresh"]["jti"]
     for session in sessions.values():
         assert session["issued_at"] and session["last_used_at"]
@@ -96,6 +107,33 @@ def test_refresh_rotates_session_records(client, store) -> None:
     new_session = store.get_session("user_1", new_refresh_jti)
     assert new_session and new_session["token_type"] == "refresh"
     assert store.count_active_sessions("user_1") == 1
+
+
+def test_cookie_refresh_rotates_without_returning_tokens(client, store) -> None:
+    _, refresh_token = issue_token_pair("user_1")
+    client.cookies.set(REFRESH_COOKIE_NAME, refresh_token)
+
+    response = client.post("/v1/auth/refresh", headers={"Origin": "http://localhost:8000"})
+
+    assert response.status_code == 200
+    assert response.json() == {"user_id": "user_1"}
+    assert "prism_access=" in response.headers.get("set-cookie", "")
+    assert refresh_token not in response.text
+    assert store.count_active_sessions("user_1") == 1
+
+
+def test_cookie_logout_revokes_tokens_and_clears_cookies(client, store) -> None:
+    access_token, refresh_token = issue_token_pair("user_1")
+    client.cookies.set(ACCESS_COOKIE_NAME, access_token)
+    client.cookies.set(REFRESH_COOKIE_NAME, refresh_token)
+
+    response = client.post("/v1/auth/logout", headers={"Origin": "http://localhost:8000"})
+
+    assert response.status_code == 204
+    assert store.count_active_sessions("user_1") == 0
+    cookies = " ".join(response.headers.get_list("set-cookie"))
+    assert "prism_access" in cookies and '""' in cookies
+    assert "prism_refresh" in cookies
 
 
 def test_logout_ends_session_and_denylists_token(client, store) -> None:
@@ -168,7 +206,8 @@ def test_admin_sessions_endpoint_reports_active_sessions_and_revocations(client,
     assert _refresh(client, refresh_y).status_code == 401  # reuse -> user_y revoked
     operator_access, _ = issue_token_pair("operator")
 
-    response = client.get("/v1/admin/auth/sessions", headers=_auth(operator_access))
+    with patch.object(settings, "admin_user_ids", ["operator"]):
+        response = client.get("/v1/admin/auth/sessions", headers=_auth(operator_access))
 
     assert response.status_code == 200
     body = response.json()

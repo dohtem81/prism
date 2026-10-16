@@ -141,7 +141,10 @@ def test_admin_endpoint_returns_recorded_violation_counts(fake_redis) -> None:
     security_events.record(events.TOKEN_REUSED, reason="refresh_token_reused", user_id="user_a")
 
     access = create_access_token("operator")
-    with patch.object(dependencies.token_store, "is_revoked", return_value=False):
+    with (
+        patch.object(dependencies.token_store, "is_revoked", return_value=False),
+        patch.object(settings, "admin_user_ids", ["operator"]),
+    ):
         response = TestClient(app).get(
             "/v1/admin/auth/violations", headers={"Authorization": f"Bearer {access}"}
         )
@@ -161,6 +164,19 @@ def test_admin_endpoint_requires_authentication(fake_redis) -> None:
 
     assert response.status_code == 401
     assert fake_redis.hashes[events.BY_EVENT_KEY] == {events.AUTH_REJECTED: "1"}
+
+
+def test_admin_endpoint_rejects_authenticated_non_admin(fake_redis) -> None:
+    access = create_access_token("regular-user")
+    with (
+        patch.object(dependencies.token_store, "is_revoked", return_value=False),
+        patch.object(settings, "admin_user_ids", ["configured-admin"]),
+    ):
+        response = TestClient(app).get(
+            "/v1/admin/auth/violations", headers={"Authorization": f"Bearer {access}"}
+        )
+
+    assert response.status_code == 403
 
 
 def test_counters_fail_open_when_redis_is_unavailable() -> None:

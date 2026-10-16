@@ -42,6 +42,17 @@ def test_register_account_returns_conflict_when_email_already_cached() -> None:
     assert db.add.call_count == 0
 
 
+def test_register_account_reserves_admin_username_case_insensitively() -> None:
+    db = MagicMock()
+    cache = MagicMock()
+
+    response = register_account(_payload(username="Admin"), db=db, cache=cache)
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 409
+    assert db.add.call_count == 0
+
+
 def test_register_account_returns_conflict_when_email_already_in_db() -> None:
     db = MagicMock()
     cache = MagicMock()

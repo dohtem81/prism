@@ -4,12 +4,12 @@ from collections import defaultdict
 from typing import DefaultDict
 
 import redis
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from services.api.app.auth import security_events as events
-from services.api.app.auth.dependencies import resolve_authenticated_user_id
+from services.api.app.auth.dependencies import ACCESS_COOKIE_NAME, is_allowed_origin, resolve_authenticated_user_id
 from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
@@ -185,10 +185,17 @@ def _resolve_user_id(token: str | None) -> str:
         raise ValueError("Invalid token") from exc
 
 
+def _resolve_websocket_user_id(websocket: WebSocket) -> str:
+    if not is_allowed_origin(websocket.headers.get("origin")):
+        security_events.record(events.AUTH_REJECTED, reason="invalid_websocket_origin")
+        raise ValueError("Invalid origin")
+    return _resolve_user_id(websocket.cookies.get(ACCESS_COOKIE_NAME))
+
+
 @router.websocket("/ws/user")
-async def user_events_gateway(websocket: WebSocket, token: str | None = Query(default=None)) -> None:
+async def user_events_gateway(websocket: WebSocket) -> None:
     try:
-        resolved_user_id = _resolve_user_id(token)
+        resolved_user_id = _resolve_websocket_user_id(websocket)
     except ValueError:
         await websocket.close(code=1008)
         return
@@ -206,11 +213,10 @@ async def user_events_gateway(websocket: WebSocket, token: str | None = Query(de
 async def websocket_gateway(
     websocket: WebSocket,
     room_id: str,
-    token: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> None:
     try:
-        resolved_user_id = _resolve_user_id(token)
+        resolved_user_id = _resolve_websocket_user_id(websocket)
     except ValueError:
         await websocket.close(code=1008)
         return

@@ -20,12 +20,16 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret"
     access_token_ttl_minutes: int = 30
     refresh_token_ttl_days: int = 7
+    auth_cookie_secure: bool = True
+    admin_user_ids: list[str] = ["admin"]
+    admin_email: str = "admin@prism.local"
+    admin_initial_password: str = "password123"
     # Short timeouts so an unreachable Redis rejects requests quickly instead of hanging them.
     token_store_redis_timeout_seconds: float = 0.5
     # Local-dev default only. Production deployments MUST set this explicitly to their real
     # browser origin(s); JSON list in env, e.g. CORS_ALLOWED_ORIGINS=["https://app.example.com"].
-    # Never use "*" with credentials. Auth is bearer-token only (no cookies, so no CSRF surface).
-    cors_allowed_origins: list[str] = ["http://localhost:8000"]
+    # Never use "*" with credentials. Browser auth uses HttpOnly cookies and validates request origins.
+    cors_allowed_origins: list[str] = ["http://localhost:8000", "https://localhost"]
 
     # Base URL the webui uses to reach the standalone registration service from the browser.
     registration_service_url: str = "http://localhost:8100"

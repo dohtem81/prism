@@ -10,6 +10,7 @@ from services.api.app.api.health import router as health_router
 from services.api.app.api.messages import router as messages_router
 from services.api.app.api.rooms import router as rooms_router
 from services.api.app.api.users import router as users_router
+from services.api.app.auth.bootstrap import ensure_default_admin_account
 from services.api.app.infra.settings import settings
 from services.api.app.realtime.websocket_gateway import router as websocket_router
 from services.api.app.ui import root_router, router as ui_router
@@ -39,6 +40,7 @@ def check_security_settings() -> None:
 
 
 app.add_event_handler("startup", check_security_settings)
+app.add_event_handler("startup", ensure_default_admin_account)
 
 
 @app.middleware("http")

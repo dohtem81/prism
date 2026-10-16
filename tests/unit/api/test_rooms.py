@@ -21,7 +21,10 @@ def test_get_current_user_id_uses_jwt_sub() -> None:
     db = MagicMock()
 
     token = create_access_token("user_42")
-    current_user_id = get_current_user_id(db=db, authorization=f"Bearer {token}")
+    current_user_id = get_current_user_id(
+        request=MagicMock(method="GET", headers={}),
+        authorization=f"Bearer {token}",
+    )
 
     assert current_user_id == "user_42"
 

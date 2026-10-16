@@ -56,6 +56,17 @@ Decision:
   with modern bcrypt releases).
 - Cap password input to 72 bytes, bcrypt's hashing limit.
 
+### Browser Authentication and Admin Authorization
+
+- Browser login uses `HttpOnly`, `Secure`, `SameSite=Lax` access and refresh cookies. Tokens are
+  not returned to browser JavaScript or passed in URLs; WebSockets authenticate from the cookie.
+- Cookie-authenticated state changes and WebSocket handshakes validate the request `Origin`.
+- A built-in `admin` account is provisioned when absent, with a required password change before
+  the first session. `ADMIN_INITIAL_PASSWORD` overrides the known default `password123` and must
+  be set before first startup in exposed environments.
+- Global operational admin routes use the `ADMIN_USER_IDS` allowlist. Room-level admin actions
+  remain scoped to room membership.
+
 ### Redis
 Pros:
 

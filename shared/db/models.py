@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,7 @@ class RegisteredAccount(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 

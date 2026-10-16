@@ -1,105 +1,63 @@
-# Auth and API security hardening plan
+# Authentication and API Security
 
-## Goal
-Strengthen the current JWT-based identity model with a broader security pass before the platform is treated as a production-grade service.
+## Status
 
-## Current status
-- JWT-based auth is implemented (`services/api/app/auth/dependencies.py`).
-- API endpoints enforce user identity and membership checks.
-- Input validation, payload limits, and rate limiting/quotas are in place (see `docs/rate-limiting-and-quotas-plan.md`).
-- Structured logging, correlation IDs, and lightweight distributed tracing are in place (see `docs/distributed-tracing-plan.md`).
-- The system does not yet include a full hardening pass for token lifecycle, session control, or transport/config hygiene.
-- This is intentionally deferred for now because the current app is optimized for local validation and demo use.
+Core authentication hardening is implemented. This page documents the current behavior and the
+deployment settings that must be reviewed.
 
-## Why we are deferring it
-The current app is intentionally minimal and straightforward. The security posture is adequate for a small, controlled deployment and for the existing test suite, but it is not a comprehensive production security design.
+## Account and Password Flow
 
-## Concrete gaps in the current implementation
-These are specific, verified gaps in `services/api/app/auth/dependencies.py` and `services/api/app/main.py`, not general concerns:
-- `resolve_authenticated_user_id` accepts a hardcoded `"dev-token"` literal that resolves to `"dev-user"` **regardless of environment** — this is a backdoor if ever deployed with `APP_ENV=prod` (or any real environment) and `settings.app_env` is never checked.
-- Access tokens are valid for 8 hours (`create_access_token`), have no `jti`, and cannot be revoked — a leaked token stays valid until natural expiry with no way to invalidate it.
-- There is no refresh token flow — clients hold one long-lived token instead of a short-lived access token + rotating refresh token.
-- `settings.jwt_secret` defaults to `"dev-secret"` and there is no startup check preventing that default from being used outside local dev.
-- `services/api/app/main.py` has no CORS middleware configured at all — any browser-based client behavior depends on browser defaults rather than an explicit, reviewed origin policy.
-- Auth failures (`401`/`403` from `get_current_user_id`, membership checks) are not logged as security events — they raise and return, but nothing records them for audit or abuse detection, unlike the rate-limit violation tracking already built in `services/api/app/infra/rate_limit.py`.
+- The API provisions a built-in account with ID and username `admin` on startup if it does not
+  already exist. Its default email is `admin@prism.local`.
+- The initial password defaults to `password123`; set `ADMIN_INITIAL_PASSWORD` before first
+  startup to use a unique value. The value is hashed with bcrypt before storage.
+- A newly provisioned admin has `must_change_password` set. The initial password cannot obtain
+  an application session: the admin must choose a different password before tokens are issued.
+- The account is not reset on later startups. Changing `ADMIN_INITIAL_PASSWORD` does not change
+  an existing account's password.
+- Public registration reserves the username `admin`.
+- Passwords must be 8-72 characters to match the bcrypt input limit.
 
-## Proposed architecture
-Add a layered security model around the current JWT pattern, reusing infra already proven in this codebase (Redis via `rate_limit.py`, structured logging via `shared/logging_utils.py`, tracing via `shared/tracing.py`).
+Migration `0006_add_admin_password_rotation` adds the persisted password-rotation flag. Apply
+all migrations before starting the API with this version.
 
-### 1) token lifecycle controls
-- short-lived access tokens (minutes, not hours)
-- refresh token issuance + rotation
-- explicit revocation via a Redis-backed denylist keyed by token `jti`
-- timeout and expiry monitoring
+## Browser Sessions
 
-### 2) session and device controls
-- track active sessions (issued_at, last_used_at) in Redis, keyed by user + `jti`
-- add a logout endpoint that revokes the current session/refresh token
-- detect refresh-token reuse (a rotated-out token used again) and revoke all sessions for that user
+- Login and forced password change set `prism_access` and `prism_refresh` cookies. Cookies are
+  `HttpOnly`, `Secure` by default, `SameSite=Lax`, and scoped to `/`.
+- Login JSON does not contain tokens. Dashboard and room navigation do not pass tokens or user
+  IDs in URLs. The server derives the signed-in identity from the access cookie.
+- Browser REST calls send cookies same-origin. Refresh rotates the refresh token and updates
+  both cookies; logout revokes the session and clears both cookies.
+- WebSockets authenticate from the access cookie and reject unapproved `Origin` values. Tokens
+  in query strings are not accepted.
+- Non-browser clients can continue using `Authorization: Bearer`. Refresh-token JSON requests
+  remain supported for these clients; query-string authentication is not supported.
+- Cookie-authenticated state-changing requests validate `Origin` to mitigate CSRF. Keep the
+  CORS/origin allowlist explicit; do not use wildcard origins with credentials.
 
-### 3) secret and config hygiene
-- fail startup (or loudly warn) if `jwt_secret` is left at its default outside local dev
-- document JWT secret rotation via environment-managed config
-- explicit `app_env` gate around any dev-only auth bypass (`dev-token`)
+## Authorization
 
-### 4) API security hardening
-- explicit CORS configuration (`allow_origins` from settings, no wildcard-with-credentials)
-- CSRF protection only if/when cookie-based auth is introduced (not needed for the current bearer-token-only model — tracked as conditional, not required now)
-- structured security event logging for failed auth and permission checks, reusing the existing `rl:violations:*` Redis-hash pattern from `rate_limit.py`
+- Global operational endpoints under `/v1/admin` require an authenticated user whose ID is in
+  `ADMIN_USER_IDS`. The default allowlist is `admin`.
+- Room metrics, membership changes, and room deletion use room-level admin membership checks;
+  a global admin allowlist entry does not bypass room authorization.
+- The bootstrap account ID is the literal `admin`, so deployments should retain that ID in
+  `ADMIN_USER_IDS` unless they intentionally change their bootstrap configuration.
 
-### 5) auditability
-Add security-specific logs/counters for:
-- rejected tokens (expired, malformed, revoked)
-- invalid room access attempts
-- failed membership checks
-- refresh-token reuse detection
-- admin actions, if/when introduced
+## Deployment Settings
 
-## Implementation phases
+- `ADMIN_INITIAL_PASSWORD`: initial password for the built-in account; change it before first
+  startup in any exposed environment.
+- `ADMIN_USER_IDS`: JSON list of globally authorized admin user IDs, for example
+  `ADMIN_USER_IDS=["admin","user-id"]`.
+- `CORS_ALLOWED_ORIGINS`: exact browser origins allowed to use the app. Include the public
+  scheme and hostname, such as `https://chat.example.com`.
+- `AUTH_COOKIE_SECURE`: defaults to `true`; use HTTPS for browser sessions.
+- `JWT_SECRET`: use a strong, unique secret. The default `dev-secret` is warned about outside
+  development.
 
-### Phase 1: close known gaps (quick wins, low risk)
-Scope: `services/api/app/auth/dependencies.py`, `services/api/app/infra/settings.py`, `services/api/app/main.py`
-- Gate the `"dev-token"` bypass behind `settings.app_env == "dev"` so it cannot resolve an identity in any other environment.
-- Add a startup check/log warning if `jwt_secret` equals the default `"dev-secret"` while `app_env != "dev"`.
-- Add explicit CORS middleware with an allow-list driven by a new `cors_allowed_origins` setting (default `["http://localhost:8000"]` for local dev).
-- Shorten the default access token lifetime (e.g. 8h → 30m) via a new `access_token_ttl_minutes` setting.
-
-### Phase 2: token lifecycle hardening
-Scope: new `services/api/app/auth/token_store.py` (Redis-backed, mirrors the pattern in `infra/rate_limit.py`), `auth/dependencies.py`
-- Add a `jti` (unique token id) and `iat` claim to every issued access token.
-- Add a refresh token type (longer-lived, single-use) with rotation on each use.
-- Add a Redis denylist (`auth:revoked:{jti}`) checked during token validation; fail open (log + allow) only for the rate-limit path, but fail **closed** (reject) here since this is a security control, not a capacity control.
-- Add a `POST /v1/auth/refresh` endpoint and a `POST /v1/auth/logout` endpoint that revokes the current session.
-
-### Phase 3: session and device visibility
-Scope: `token_store.py`, new `GET /v1/admin/auth/sessions` admin endpoint (mirrors `GET /v1/admin/rate-limits/violations`)
-- Track last-used metadata per session in Redis.
-- Detect and log refresh-token reuse; revoke all sessions for the affected user on detection.
-- Expose active session counts / recent revocations for operator visibility.
-
-### Phase 4: transport hardening and auditability
-Scope: `main.py`, `shared/logging_utils.py` or a small `security_events.py` helper
-- Finalize CORS/origin policy for the deployment target.
-- Log structured security events (`auth_rejected`, `membership_denied`, `token_reused`) with correlation ID and trace context, following the existing logging conventions.
-- Track violation counts in Redis hashes (same approach as `rate_limiter.record_violation`) so they can be surfaced through the admin API alongside rate-limit violations.
-
-## Acceptance criteria
-- The `dev-token` bypass cannot authenticate outside `app_env == "dev"`.
-- Access tokens are short-lived (≤30m) and refresh tokens rotate safely.
-- A revoked or reused token is rejected immediately, even if not yet expired.
-- CORS is explicitly configured — no implicit/default-open origin behavior.
-- Security-relevant events (rejected tokens, denied membership checks, token reuse) are logged and countable via the admin API.
-- The deployment config supports secure secret handling and flags insecure defaults outside dev.
-
-## Relevant files
-- services/api/app/auth/dependencies.py
-- services/api/app/infra/settings.py
-- services/api/app/infra/rate_limit.py (pattern reference for Redis-backed state + violation tracking)
-- services/api/app/main.py
-- services/api/app/api/users.py
-- services/api/app/api/rooms.py
-- services/api/app/api/messages.py
-- services/api/app/api/admin.py
-- docs/implementation-todo.md
-- docs/rate-limiting-and-quotas-plan.md
-
+Access tokens use short lifetimes and carry unique IDs. Redis tracks active sessions, token
+revocation, refresh rotation, and reuse detection. Authentication and authorization failures
+are recorded as structured security events and are visible through the protected operational
+admin endpoints.

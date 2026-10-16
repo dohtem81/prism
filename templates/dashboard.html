@@ -562,14 +562,46 @@
     </div>
 
     <script>
-      const params = new URLSearchParams(window.location.search);
-      const activeUserId = params.get('user_id') || 'dev-user';
-      const activeToken = params.get('token') || 'dev-token';
+      const activeUserId = {{ user_id|tojson }};
+      const accessTokenTtlSeconds = {{ access_token_ttl_seconds|tojson }};
       const roomId = {{ (room_id if room_id is defined and room_id else none)|tojson }};
       const roomName = {{ (room_name if room_name is defined and room_name else "Dashboard")|tojson }};
       const roomRole = {{ (room_role if room_role is defined and room_role else none)|tojson }};
       const roomPreferredLang = {{ (room_preferred_lang if room_preferred_lang is defined and room_preferred_lang else none)|tojson }};
       const wsBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+
+      async function apiFetch(url, options = {}) {
+        const response = await fetch(url, { ...options, credentials: 'same-origin' });
+        if (response.status !== 401) return response;
+
+        const refreshResponse = await fetch('/v1/auth/refresh', {
+          method: 'POST',
+          credentials: 'same-origin',
+        });
+        if (!refreshResponse.ok) return response;
+        return fetch(url, { ...options, credentials: 'same-origin' });
+      }
+
+      function scheduleSessionRefresh() {
+        const refreshDelay = Math.max(1000, accessTokenTtlSeconds * 750);
+        setTimeout(async () => {
+          try {
+            const response = await fetch('/v1/auth/refresh', {
+              method: 'POST',
+              credentials: 'same-origin',
+            });
+            if (!response.ok) {
+              window.location.href = '/ui/login';
+              return;
+            }
+            scheduleSessionRefresh();
+          } catch (error) {
+            scheduleSessionRefresh();
+          }
+        }, refreshDelay);
+      }
+      scheduleSessionRefresh();
+
       const state = {
         rooms: [],
         messages: [],
@@ -618,13 +650,6 @@
         scrollToLatestUpdated();
       });
 
-      function roomQueryString() {
-        const search = new URLSearchParams();
-        search.set('user_id', activeUserId);
-        search.set('token', activeToken);
-        return search.toString();
-      }
-
       function renderRooms() {
         roomList.innerHTML = '';
         roomSelect.innerHTML = '<option value="">Select a room you own or belong to…</option>';
@@ -640,7 +665,7 @@
         for (const room of state.rooms) {
           const item = document.createElement('li');
           const link = document.createElement('a');
-          const roomUrl = `/ui/rooms/${room.room_id}?${roomQueryString()}`;
+          const roomUrl = `/ui/rooms/${room.room_id}`;
           link.href = roomUrl;
           const label = document.createElement('div');
           label.className = 'room-label';
@@ -798,9 +823,7 @@
       async function fetchRooms() {
         const seq = ++roomsFetchSeq;
         try {
-          const response = await fetch(`/v1/rooms?user_id=${encodeURIComponent(activeUserId)}`, {
-            headers: { Authorization: `Bearer ${activeToken}` }
-          });
+          const response = await apiFetch('/v1/rooms');
           if (!response.ok) {
             throw new Error('rooms unavailable');
           }
@@ -821,15 +844,12 @@
           const lastMessageId = localStorage.getItem(storageKey);
           const shouldUseCursor = state.messages.length > 0 && !!lastMessageId;
           const url = new URL(`/v1/rooms/${roomId}/messages`, window.location.origin);
-          url.searchParams.set('user_id', activeUserId);
           url.searchParams.set('limit', '50');
           if (shouldUseCursor) {
             url.searchParams.set('since_message_id', lastMessageId);
           }
 
-          const response = await fetch(url.toString().replace(window.location.origin, ''), {
-            headers: { Authorization: `Bearer ${activeToken}` }
-          });
+          const response = await apiFetch(url.toString().replace(window.location.origin, ''));
           if (!response.ok) {
             throw new Error('messages unavailable');
           }
@@ -860,7 +880,7 @@
           state.socket.close();
         }
 
-        const socketUrl = `${wsBase}/ws/${roomId}?token=${encodeURIComponent(activeToken)}&user_id=${encodeURIComponent(activeUserId)}`;
+        const socketUrl = `${wsBase}/ws/${roomId}`;
         const socket = new WebSocket(socketUrl);
         state.socket = socket;
 
@@ -894,7 +914,7 @@
           }
 
           if (payload.type === 'RoomDeleted') {
-            window.location.href = `/ui?${roomQueryString()}`;
+            window.location.href = '/ui';
             return;
           }
 
@@ -930,12 +950,9 @@
         };
 
         try {
-          const response = await fetch(`/v1/messages?user_id=${encodeURIComponent(activeUserId)}`, {
+          const response = await apiFetch('/v1/messages', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${activeToken}`
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
           if (!response.ok) {
@@ -993,9 +1010,9 @@
         const preferredLang = document.getElementById('createRoomLang').value.trim();
 
         try {
-          const response = await fetch(`/v1/rooms?${roomQueryString()}`, {
+          const response = await apiFetch('/v1/rooms', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, preferred_lang: preferredLang }),
           });
           const body = await response.json();
@@ -1003,7 +1020,7 @@
 
           createRoomForm.reset();
           document.getElementById('createRoomLang').value = 'en';
-          window.location.href = `/ui/rooms/${body.room_id}?${roomQueryString()}`;
+          window.location.href = `/ui/rooms/${body.room_id}`;
         } catch (error) {
           createRoomNote.textContent = error.message;
         }
@@ -1016,15 +1033,15 @@
         const preferredLang = document.getElementById('joinRoomLang').value.trim();
 
         try {
-          const response = await fetch(`/v1/rooms/${encodeURIComponent(targetRoomId)}/join?${roomQueryString()}`, {
+          const response = await apiFetch(`/v1/rooms/${encodeURIComponent(targetRoomId)}/join`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ preferred_lang: preferredLang }),
           });
           const body = await response.json();
           if (!response.ok) throw new Error(body.detail || 'Failed to join room');
 
-          window.location.href = `/ui/rooms/${body.room_id}?${roomQueryString()}`;
+          window.location.href = `/ui/rooms/${body.room_id}`;
         } catch (error) {
           joinRoomNote.textContent = error.message;
         }
@@ -1037,9 +1054,9 @@
         const preferredLang = document.getElementById('settingsPreferredLang').value.trim();
 
         try {
-          const response = await fetch(`/v1/users?${roomQueryString()}`, {
+          const response = await apiFetch('/v1/users', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ display_name: displayName || null, preferred_lang: preferredLang }),
           });
           const body = await response.json();
@@ -1072,9 +1089,7 @@
       async function loadRoomStats() {
         if (!roomId || roomRole !== 'admin') return;
         try {
-          const response = await fetch(`/v1/admin/rooms/${roomId}/metrics?${roomQueryString()}`, {
-            headers: { Authorization: `Bearer ${activeToken}` },
-          });
+          const response = await apiFetch(`/v1/admin/rooms/${roomId}/metrics`);
           if (!response.ok) throw new Error('stats unavailable');
           const summary = await response.json();
           statsPanel.style.display = 'block';
@@ -1091,9 +1106,9 @@
         const preferredLang = document.getElementById('addMemberLang').value.trim();
 
         try {
-          const response = await fetch(`/v1/rooms/${roomId}/members?${roomQueryString()}`, {
+          const response = await apiFetch(`/v1/rooms/${roomId}/members`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: memberUserId, preferred_lang: preferredLang }),
           });
           const body = await response.json();
@@ -1116,7 +1131,7 @@
 
       openRoomButton.addEventListener('click', () => {
         if (!roomSelect.value) return;
-        window.location.href = `/ui/rooms/${roomSelect.value}?${roomQueryString()}`;
+        window.location.href = `/ui/rooms/${roomSelect.value}`;
       });
       roomSelect.addEventListener('change', () => openRoomButton.click());
 
@@ -1215,9 +1230,9 @@
 
         ids.forEach(id => inFlightSeen.add(id));
         try {
-          const response = await fetch(`/v1/rooms/${encodeURIComponent(roomId)}/messages/seen`, {
+          const response = await apiFetch(`/v1/rooms/${encodeURIComponent(roomId)}/messages/seen`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message_ids: ids.slice(0, 200) }),
           });
           if (!response.ok) throw new Error('seen failed');
@@ -1235,15 +1250,14 @@
         if (!roomId) return;
         if (!confirm(`Delete room "${roomName}" and all its messages? This cannot be undone.`)) return;
         try {
-          const response = await fetch(`/v1/rooms/${encodeURIComponent(roomId)}?${roomQueryString()}`, {
+          const response = await apiFetch(`/v1/rooms/${encodeURIComponent(roomId)}`, {
             method: 'DELETE',
-            headers: { Authorization: `Bearer ${activeToken}` },
           });
           if (!response.ok) {
             const body = await response.json().catch(() => ({}));
             throw new Error(body.detail || 'Failed to delete room');
           }
-          window.location.href = `/ui?${roomQueryString()}`;
+          window.location.href = '/ui';
         } catch (error) {
           sendNote.textContent = error.message;
         }
@@ -1251,7 +1265,7 @@
 
       let roomsRefreshTimer = null;
       function connectUserSocket() {
-        const socket = new WebSocket(`${wsBase}/ws/user?token=${encodeURIComponent(activeToken)}`);
+        const socket = new WebSocket(`${wsBase}/ws/user`);
         socket.onmessage = (event) => {
           const payload = JSON.parse(event.data);
           if (payload.type !== 'RoomUnreadHint') return;

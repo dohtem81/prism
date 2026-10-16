@@ -57,6 +57,7 @@
       }
       .message { margin-top: 14px; font-size: 0.85rem; }
       .message.error { color: var(--danger); }
+      [hidden] { display: none !important; }
       .footer-link { margin-top: 16px; font-size: 0.85rem; color: var(--muted); text-align: center; }
       .footer-link a { color: #60a5fa; }
     </style>
@@ -73,6 +74,15 @@
 
         <button type="submit">Log in</button>
       </form>
+      <form id="passwordChangeForm" hidden>
+        <label for="newPassword">New password</label>
+        <input id="newPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password" />
+
+        <label for="confirmPassword">Confirm new password</label>
+        <input id="confirmPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password" />
+
+        <button type="submit">Change password</button>
+      </form>
       <div id="formMessage" class="message"></div>
       <div class="footer-link">Need an account? <a href="/ui/register">Register</a></div>
       <div class="footer-link"><a href="/">← Back to home</a></div>
@@ -80,7 +90,13 @@
 
     <script>
       const form = document.getElementById('loginForm');
+      const passwordChangeForm = document.getElementById('passwordChangeForm');
       const formMessage = document.getElementById('formMessage');
+      let bootstrapCredentials;
+
+      function openDashboard() {
+        window.location.href = '/ui';
+      }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -100,16 +116,51 @@
           });
           const body = await response.json();
 
+          if (response.status === 428) {
+            bootstrapCredentials = payload;
+            form.hidden = true;
+            passwordChangeForm.hidden = false;
+            formMessage.textContent = 'Set a new password to finish signing in.';
+            return;
+          }
+
           if (!response.ok) {
             throw new Error(body.detail || 'Invalid credentials');
           }
 
-          const search = new URLSearchParams();
-          search.set('user_id', body.user_id);
-          search.set('token', body.access_token);
-          window.location.href = `/ui?${search.toString()}`;
+          openDashboard();
         } catch (error) {
           formMessage.textContent = error.message || 'Invalid credentials';
+          formMessage.className = 'message error';
+        }
+      });
+
+      passwordChangeForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        formMessage.className = 'message';
+        if (document.getElementById('newPassword').value !== document.getElementById('confirmPassword').value) {
+          formMessage.textContent = 'The new passwords do not match.';
+          formMessage.className = 'message error';
+          return;
+        }
+
+        try {
+          const response = await fetch('/v1/auth/password/change', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username_or_email: bootstrapCredentials.username_or_email,
+              current_password: bootstrapCredentials.password,
+              new_password: document.getElementById('newPassword').value,
+            }),
+          });
+          const body = await response.json();
+          if (!response.ok) {
+            throw new Error(body.detail || 'Password change failed');
+          }
+          openDashboard();
+        } catch (error) {
+          formMessage.textContent = error.message || 'Password change failed';
           formMessage.className = 'message error';
         }
       });

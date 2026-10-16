@@ -32,12 +32,12 @@ def _already_exists(db: Session, cache: Redis, email: str, username: str) -> boo
     return existing is not None
 
 
-def _conflict_response() -> JSONResponse:
+def _conflict_response(detail: str = "An account with this email or username already exists.") -> JSONResponse:
     return JSONResponse(
         status_code=409,
         content=RegisterAccountError(
             error="account_already_exists",
-            detail="An account with this email or username already exists.",
+            detail=detail,
             redirect_url=settings.auth_service_url,
         ).model_dump(),
         headers={"Location": settings.auth_service_url},
@@ -50,6 +50,8 @@ def register_account(
     db: Session = Depends(get_db),
     cache: Redis = Depends(get_redis),
 ) -> RegisterAccountResponse | JSONResponse:
+    if payload.username.casefold() == "admin":
+        return _conflict_response("The username 'admin' is reserved.")
     if _already_exists(db, cache, payload.email, payload.username):
         return _conflict_response()
 

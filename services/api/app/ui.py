@@ -52,12 +52,17 @@ async def login_page(request: Request) -> HTMLResponse:
 
 
 @router.get("", response_class=HTMLResponse)
-async def dashboard_page(request: Request) -> HTMLResponse:
+async def dashboard_page(
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+) -> HTMLResponse:
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "title": "Prism Dashboard",
+            "user_id": current_user_id,
+            "access_token_ttl_seconds": settings.access_token_ttl_minutes * 60,
         },
     )
 
@@ -89,5 +94,7 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
             "room_name": room.name,
             "room_role": membership.role,
             "room_preferred_lang": membership.preferred_lang,
+            "user_id": current_user_id,
+            "access_token_ttl_seconds": settings.access_token_ttl_minutes * 60,
         },
     )

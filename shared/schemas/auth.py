@@ -6,10 +6,13 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=72)
 
 
+class PasswordChangeRequest(BaseModel):
+    username_or_email: str = Field(min_length=1, max_length=255)
+    current_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
+
+
 class LoginResponse(BaseModel):
-    access_token: str
-    refresh_token: str | None = None
-    token_type: str = "bearer"
     user_id: str
 
 

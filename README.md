@@ -117,24 +117,57 @@ OPENROUTER_API_KEY=your_key_here
 
 > If port 8000 is already in use, set `API_PORT` in `.env` to a free port (e.g. `8010`).
 
-**3. Start all services**
+**3. Start the database and infrastructure dependencies**
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up --build
+docker compose -f deploy/compose/docker-compose.yml up -d postgres rabbitmq redis
 ```
 
-**4. Run database migrations** (in a separate shell)
+**4. Run database migrations**
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml run --rm api alembic -c migrations/alembic.ini upgrade head
 ```
 
-**5. Open the webui**
+**5. Start the application services**
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up --build
+```
+
+**6. Open the webui**
 
 Navigate to `http://localhost:8000/` — the welcome page links to **Log in** or **Register**.
 Register an account, log in, then create or join a room from the dashboard. From there you can
 send messages, change your default language (Settings), and — if you're a room's owner — see
 live message/translation/cost stats in that room.
+
+### Authentication and admin access
+
+After migrations are applied, the API creates a built-in account on startup if it does not
+already exist:
+
+- Username: `admin`
+- Initial password: `password123` (override with `ADMIN_INITIAL_PASSWORD` before first startup)
+- Email: `admin@prism.local`
+
+The first successful admin login requires setting a new password before the app issues a
+session. The `admin` username is reserved from public registration. The initial password is a
+known default: set a unique `ADMIN_INITIAL_PASSWORD` before exposing any deployment. This
+setting is used only when the account is first created; changing it later does not reset an
+existing account's password.
+
+Browser sessions use `HttpOnly`, `Secure`, `SameSite=Lax` cookies for access and refresh
+tokens. Tokens and user IDs are not passed in page URLs or WebSocket query strings.
+Cookie-authenticated state-changing requests and WebSocket handshakes validate their `Origin` against
+`CORS_ALLOWED_ORIGINS`; set that allowlist to the exact public app origin in deployed
+environments. `AUTH_COOKIE_SECURE` defaults to `true`. Non-browser API clients may continue to
+use `Authorization: Bearer`; query-string tokens are not accepted.
+
+Global operational endpoints under `/v1/admin` require the caller's ID in `ADMIN_USER_IDS`
+(default: `admin`). Set this to a JSON list, for example `ADMIN_USER_IDS=["admin","user-id"]`.
+Room metrics and room-management operations continue to require admin membership in the
+specific room.
 
 | Page | URL |
 |---|---|
@@ -144,7 +177,7 @@ live message/translation/cost stats in that room.
 | Dashboard (create/join room) | `http://localhost:8000/ui` |
 | Room chat | `http://localhost:8000/ui/rooms/{room_id}` |
 
-**6. Verify the API**
+**7. Verify the API**
 
 ```bash
 curl http://localhost:8000/v1/health
@@ -216,6 +249,8 @@ Room/message analytics (`/v1/admin/rooms/{room_id}/metrics`) and basic observabi
 - Lightweight distributed tracing — trace/span context propagated from HTTP requests through Celery into the worker, instrumenting message, room, websocket, and admin request paths plus translation job execution
 - Rate limiting, daily quotas, and abuse protection (per-user/per-room message limits, room creation limits, websocket connection caps) with an admin violation-visibility endpoint
 - Input validation and payload size limits
+- Browser authentication with secure HttpOnly cookies, refresh rotation, logout revocation, and Origin validation
+- Default admin bootstrap with mandatory initial password change and allowlist-protected global admin endpoints
 - Seed / dev bootstrap script for quick local QA setup
 - Docker-first local dev with Postgres, RabbitMQ, Redis, API, and worker
 
@@ -223,7 +258,6 @@ Room/message analytics (`/v1/admin/rooms/{room_id}/metrics`) and basic observabi
 - Redis pub/sub fan-out across multiple API replicas (currently single-instance only)
 - Load, latency, and performance baselines under realistic traffic
 - Stronger multi-tenancy boundaries and tenant isolation controls
-- Broader auth/API security hardening beyond JWT (token rotation, session revocation, CSRF/CORS hardening)
 - A tracing exporter/storage backend (OTLP or similar) — spans are currently structured log events only, with no external collector or visualization
 
 ---

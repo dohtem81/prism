@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from services.api.app.api.messages import send_message
-from services.api.app.auth.dependencies import create_access_token
+from services.api.app.auth.dependencies import ACCESS_COOKIE_NAME, create_access_token
 from services.api.app.infra.db import get_db
 from services.api.app.main import app
 from services.api.app.realtime.websocket_gateway import _resolve_user_id, manager
@@ -34,10 +34,14 @@ def test_message_broadcasts_to_room_websocket_subscribers() -> None:
     websocket_member.user_id = "user_1"
     websocket_db.scalar.side_effect = [websocket_room, websocket_member]
     app.dependency_overrides[get_db] = lambda: websocket_db
+    client = TestClient(app)
+    client.cookies.set(ACCESS_COOKIE_NAME, token)
 
     try:
-        with TestClient(app) as client:
-            with client.websocket_connect(f"/ws/room_1?token={token}") as websocket:
+        with client:
+            with client.websocket_connect(
+                "/ws/room_1", headers={"Origin": "http://localhost:8000"}
+            ) as websocket:
                 db = MagicMock()
                 room = MagicMock()
                 room.id = "room_1"
@@ -79,10 +83,14 @@ def test_message_send_and_translation_flow_are_enqueued_and_updated() -> None:
     websocket_member.user_id = "user_1"
     websocket_db.scalar.side_effect = [websocket_room, websocket_member]
     app.dependency_overrides[get_db] = lambda: websocket_db
+    client = TestClient(app)
+    client.cookies.set(ACCESS_COOKIE_NAME, token)
 
     try:
-        with TestClient(app) as client:
-            with client.websocket_connect(f"/ws/room_1?token={token}") as websocket:
+        with client:
+            with client.websocket_connect(
+                "/ws/room_1", headers={"Origin": "http://localhost:8000"}
+            ) as websocket:
                 db = MagicMock()
                 room = MagicMock()
                 room.id = "room_1"

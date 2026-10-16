@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, Header, HTTPException, Query, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from jose import ExpiredSignatureError, JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,12 @@ ACCESS = "access"
 REFRESH = "refresh"
 
 logger = get_logger("prism.api.auth")
+ACCESS_COOKIE_NAME = "prism_access"
+REFRESH_COOKIE_NAME = "prism_refresh"
+
+
+def is_allowed_origin(origin: str | None) -> bool:
+    return origin is not None and origin in settings.cors_allowed_origins
 
 
 def _unauthorized(detail: str = "Invalid token") -> HTTPException:
@@ -201,18 +207,29 @@ def revoke_session_tokens(access_token: str | None, refresh_token: str | None) -
 
 
 def get_current_user_id(
+    request: Request,
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
-    token: Annotated[str | None, Query()] = None,
-    db: Session = Depends(get_db),
+    access_cookie: Annotated[str | None, Cookie(alias=ACCESS_COOKIE_NAME)] = None,
 ) -> str:
-    if not authorization and not token:
+    if not authorization and not access_cookie:
         raise _reject("missing_credentials", detail="Missing Authorization header")
 
-    resolved_token = token
     if authorization:
         scheme, _, bearer_token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not bearer_token:
             raise _reject("malformed_authorization_header", detail="Invalid Authorization header")
         resolved_token = bearer_token
+    else:
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not is_allowed_origin(
+            request.headers.get("origin")
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid request origin")
+        resolved_token = access_cookie
 
     return resolve_authenticated_user_id(resolved_token)
+
+
+def get_current_admin_user_id(current_user_id: str = Depends(get_current_user_id)) -> str:
+    if current_user_id not in settings.admin_user_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin authorization required")
+    return current_user_id
