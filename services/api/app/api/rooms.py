@@ -6,7 +6,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from services.api.app.auth import security_events as events
-from services.api.app.auth.dependencies import get_current_user_id
+from services.api.app.auth.dependencies import get_current_user_id, is_global_admin
 from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
@@ -28,6 +28,8 @@ from shared.schemas.rooms import (
 from shared.tracing import start_span
 
 router = APIRouter(prefix="/v1/rooms", tags=["rooms"])
+
+OBSERVER_ROLE = "observer"
 
 
 def _message_is_after_anchor(message: Message, anchor: Message) -> bool:
@@ -107,6 +109,24 @@ def list_rooms(
                     created_at=room.created_at,
                     has_unread=unread > 0,
                     unread_count=unread,
+                )
+            )
+
+    if is_global_admin(current_user_id):
+        # Global admins can observe every room read-only; membership (and posting) is unchanged.
+        member_room_ids = {room.room_id for room in rooms}
+        other_rooms = db.scalars(select(Room).order_by(Room.created_at.desc())).all()
+        for room in other_rooms:
+            if room.id in member_room_ids:
+                continue
+            rooms.append(
+                RoomSummary(
+                    room_id=room.id,
+                    name=room.name,
+                    role=OBSERVER_ROLE,
+                    preferred_lang="en",
+                    default_translation_mode=room.default_translation_mode,
+                    created_at=room.created_at,
                 )
             )
 
@@ -224,7 +244,7 @@ def list_room_messages(
             RoomMember.user_id == current_user_id,
         )
     )
-    if not membership:
+    if not membership and not is_global_admin(current_user_id):
         security_events.record(
             events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=current_user_id, room_id=room_id
         )

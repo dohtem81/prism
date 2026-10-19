@@ -9,7 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from services.api.app.auth import security_events as events
-from services.api.app.auth.dependencies import ACCESS_COOKIE_NAME, is_allowed_origin, resolve_authenticated_user_id
+from services.api.app.auth.dependencies import (
+    ACCESS_COOKIE_NAME,
+    is_allowed_origin,
+    is_global_admin,
+    resolve_authenticated_user_id,
+)
 from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.rate_limit import rate_limiter
@@ -232,7 +237,7 @@ async def websocket_gateway(
             RoomMember.user_id == resolved_user_id,
         )
     )
-    if not membership:
+    if not membership and not is_global_admin(resolved_user_id):
         security_events.record(
             events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=resolved_user_id, room_id=room_id
         )

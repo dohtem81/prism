@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from fastapi import Depends
 
 from services.api.app.auth import security_events as events
-from services.api.app.auth.dependencies import get_current_user_id
+from services.api.app.auth.dependencies import get_current_user_id, is_global_admin
 from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.settings import settings
@@ -51,6 +51,17 @@ async def login_page(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/verify", response_class=HTMLResponse)
+async def verify_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "verify.html",
+        {
+            "request": request,
+            "title": "Prism · Verify email",
+        },
+    )
+
+
 @router.get("", response_class=HTMLResponse)
 async def dashboard_page(
     request: Request,
@@ -79,7 +90,8 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
             RoomMember.user_id == current_user_id,
         )
     )
-    if not membership:
+    observer = membership is None and is_global_admin(current_user_id)
+    if not membership and not observer:
         security_events.record(
             events.MEMBERSHIP_DENIED, reason="not_a_member", user_id=current_user_id, room_id=room_id
         )
@@ -92,8 +104,8 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
             "title": f"Prism · {room.name}",
             "room_id": room_id,
             "room_name": room.name,
-            "room_role": membership.role,
-            "room_preferred_lang": membership.preferred_lang,
+            "room_role": "observer" if observer else membership.role,
+            "room_preferred_lang": None if observer else membership.preferred_lang,
             "user_id": current_user_id,
             "access_token_ttl_seconds": settings.access_token_ttl_minutes * 60,
         },

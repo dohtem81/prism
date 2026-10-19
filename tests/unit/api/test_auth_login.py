@@ -1,7 +1,9 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support.requests import REQUEST
+from tests.support.requests import REQUEST
 from fastapi import HTTPException, Request, Response
 from fastapi.testclient import TestClient
 
@@ -23,6 +25,7 @@ def _account(**overrides) -> RegisteredAccount:
         "username": "ada",
         "password_hash": hash_password("supersecret1"),
         "must_change_password": False,
+        "email_verified_at": datetime.now(timezone.utc),
         "created_at": datetime.now(timezone.utc),
     }
     data.update(overrides)
@@ -34,7 +37,7 @@ def test_login_succeeds_with_correct_username_and_password() -> None:
     db.scalar.return_value = _account()
     cookie_response = Response()
 
-    response = login(LoginRequest(username_or_email="ada", password="supersecret1"), response=cookie_response, db=db)
+    response = login(LoginRequest(username_or_email="ada", password="supersecret1"), request=REQUEST, response=cookie_response, db=db)
 
     assert response.user_id == "user_1"
     cookie_headers = " ".join(cookie_response.headers.getlist("set-cookie"))
@@ -112,7 +115,7 @@ def test_login_rejects_wrong_password() -> None:
     db.scalar.return_value = _account()
 
     with pytest.raises(HTTPException) as exc:
-        login(LoginRequest(username_or_email="ada", password="wrong-password"), response=Response(), db=db)
+        login(LoginRequest(username_or_email="ada", password="wrong-password"), request=REQUEST, response=Response(), db=db)
 
     assert exc.value.status_code == 401
 
@@ -122,7 +125,7 @@ def test_login_rejects_unknown_account() -> None:
     db.scalar.return_value = None
 
     with pytest.raises(HTTPException) as exc:
-        login(LoginRequest(username_or_email="nobody", password="supersecret1"), response=Response(), db=db)
+        login(LoginRequest(username_or_email="nobody", password="supersecret1"), request=REQUEST, response=Response(), db=db)
 
     assert exc.value.status_code == 401
 
@@ -137,7 +140,7 @@ def test_login_requires_bootstrap_admin_password_change() -> None:
     )
 
     with pytest.raises(HTTPException) as exc:
-        login(LoginRequest(username_or_email="admin", password="password123"), response=Response(), db=db)
+        login(LoginRequest(username_or_email="admin", password="password123"), request=REQUEST, response=Response(), db=db)
 
     assert exc.value.status_code == 428
 
@@ -162,6 +165,7 @@ def test_password_change_updates_bootstrap_password_and_issues_tokens() -> None:
                 current_password="password123",
                 new_password="a-new-secure-password",
             ),
+            request=REQUEST,
             response=cookie_response,
             db=db,
         )

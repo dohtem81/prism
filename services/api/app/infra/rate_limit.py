@@ -31,6 +31,10 @@ class RateLimiter:
     def __init__(self, client: redis.Redis) -> None:
         self._client = client
 
+    @property
+    def client(self) -> redis.Redis:
+        return self._client
+
     def check(self, key: str, limit: int, window_seconds: int) -> RateLimitDecision:
         if not settings.rate_limit_enabled:
             return RateLimitDecision(allowed=True, limit=limit, remaining=limit, reset_seconds=window_seconds)

@@ -77,3 +77,4 @@ Tracks current task status and next actions.
 | 2026-10-09 | P1-24 Phase 4 implemented: structured security events, Redis violation counters, `GET /v1/admin/auth/violations`, CORS production note (Phase 3 still open) |
 | 2026-10-09 | P1-19 DONE: multi-instance realtime fan-out via Redis pub/sub with per-room local subscriptions, cleanup on last disconnect, and re-subscribe on Redis errors |
 | 2026-10-09 | P1-24 Phase 3 implemented and P1-24 marked DONE: Redis session tracking, full-user session revocation on refresh-token reuse, `GET /v1/admin/auth/sessions` |
+| 2026-10-19 | Registration/login abuse hardening: CORS wildcard removed from registration, per-IP/domain registration limits, login IP limits with progressive account lockout, email verification (migration 0008, verify/resend endpoints, login 403 until verified), Mailpit local SMTP, read-only observer access to all rooms for global admins |

@@ -8,6 +8,7 @@ class RegisterAccountRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
     # bcrypt silently ignores/rejects bytes beyond 72, so cap input length here.
     password: str = Field(min_length=8, max_length=72)
+    turnstile_token: str = Field(min_length=1, max_length=2048)
 
 
 class RegisterAccountResponse(BaseModel):

@@ -10,13 +10,14 @@ logger = get_logger("prism.registration")
 
 app = FastAPI(title=settings.app_name)
 
-# Registration runs on its own origin/port; the webui (served by the api service) calls it directly from the browser.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["POST"],
-    allow_headers=["*"],
-)
+# Same-origin via the reverse proxy needs no CORS; only explicitly listed origins are allowed otherwise.
+if settings.cors_allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allowed_origins,
+        allow_methods=["POST"],
+        allow_headers=["Content-Type"],
+    )
 
 app.include_router(health_router)
 app.include_router(register_router)

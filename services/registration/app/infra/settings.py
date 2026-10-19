@@ -20,5 +20,16 @@ class Settings(BaseSettings):
     # Where clients are sent when registration fails because the account already exists.
     auth_service_url: str = "http://localhost:8000/ui/login"
 
+    turnstile_secret: str = ""
+    turnstile_hostnames: str = ""
+
+    # Exact browser origins allowed cross-origin; empty (default) means same-origin only.
+    cors_allowed_origins: list[str] = []
+
+    rate_limit_enabled: bool = True
+    registration_ip_per_hour: int = 5
+    registration_ip_per_day: int = 20
+    registration_domain_per_hour: int = 50
+
 
 settings = Settings()

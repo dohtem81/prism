@@ -180,6 +180,43 @@ Creates a linked `users` row (referenced by rooms/messages) and an `auth.account
 On conflict (email or username already registered), returns 409 with a `redirect_url` pointing
 to the auth/login flow instead of a generic validation error.
 
+The request also carries a Cloudflare Turnstile `turnstile_token`. Per-IP and per-email-domain
+rate limits apply (429 with `Retry-After`). The new account is unverified: a verification email
+with a single-use link is sent, and login is refused until it is used.
+
+### Email Verification
+
+POST /v1/auth/verify-email
+
+```json
+{ "token": "<token from the email link>" }
+```
+
+Returns 200 `{"status": "verified"}`; 400 for unknown, used or expired (24h) tokens. Tokens are
+stored hashed and are single-use. The emailed link is `<PUBLIC_BASE_URL>/ui/verify#token=...`
+(the token is in the URL fragment, so it never reaches server logs).
+
+POST /v1/auth/resend-verification
+
+```json
+{ "username_or_email": "ada" }
+```
+
+Always returns 202 `{"status": "accepted"}` (no account enumeration); a new email is sent only
+for existing, unverified accounts. Limited to 5 requests/hour per IP and per identifier.
+
+### Login
+
+POST /v1/auth/login with `username_or_email` and `password`.
+
+| Status | Meaning |
+|---|---|
+| 200 | Success; `prism_access` / `prism_refresh` cookies set |
+| 401 | Invalid credentials |
+| 403 | Correct password but email not verified ("Verify your email before logging in") |
+| 428 | Password change required (built-in admin first login) |
+| 429 | IP rate limit or account lockout; see `Retry-After` |
+
 ### Create Room
 
 POST /v1/rooms

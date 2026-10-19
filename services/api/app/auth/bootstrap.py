@@ -27,6 +27,7 @@ def ensure_default_admin_account() -> None:
                 username="admin",
                 password_hash=hash_password(settings.admin_initial_password),
                 must_change_password=True,
+                email_verified_at=now,
                 created_at=now,
             )
         )

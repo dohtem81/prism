@@ -35,6 +35,26 @@ class RegisteredAccount(Base):
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class EmailVerificationToken(Base):
+    """Single-use email verification token; only the SHA-256 of the token is stored."""
+
+    __tablename__ = "email_verification_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_auth_email_verification_tokens_hash"),
+        {"schema": "auth"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("auth.accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 

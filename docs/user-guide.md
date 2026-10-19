@@ -20,6 +20,8 @@ Open the app at `https://localhost` when running the local Docker stack (accept 
 
    ![Registration success](user-guide/img/03-register-success.png)
 
+4. Open the verification email and click the link. You cannot log in until your email is verified. Links expire after 24 hours; on the login page, **Resend verification email** sends a new one. For the local Docker stack, emails are caught by Mailpit at http://localhost:8025.
+
 If the email or username is already taken, an error is shown and you are sent to the login page.
 
 ## 2. Log in
@@ -91,4 +93,4 @@ $env:NODE_PATH="<that folder>\node_modules"
 node docs/user-guide/capture-screenshots.cjs
 ```
 
-The register page posts to `REGISTRATION_SERVICE_URL`; set `REGISTRATION_SERVICE_URL=https://localhost` in `.env` when using the Caddy proxy. Re-running the script reuses existing demo accounts and creates a new room.
+The register page posts to `REGISTRATION_SERVICE_URL`; set `REGISTRATION_SERVICE_URL=https://localhost` in `.env` when using the Caddy proxy. Re-running the script reuses existing demo accounts and creates a new room. Newly registered accounts must be verified (via the link in Mailpit) before the script can log in as them.

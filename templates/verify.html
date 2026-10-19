@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <title>{{ title }}</title>
+    <style>
+      :root { --bg: #0f172a; --panel: #111827; --text: #e5e7eb; --muted: #94a3b8; --accent-strong: #2563eb; --danger: #ef4444; --ok: #22c55e; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: Arial, sans-serif; background: var(--bg); color: var(--text); }
+      .card { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid rgba(148,163,184,0.2); border-radius: 14px; padding: 24px; }
+      h1 { margin-top: 0; font-size: 1.3rem; }
+      .message { margin: 14px 0; font-size: 0.95rem; color: var(--muted); }
+      .message.error { color: var(--danger); }
+      .message.success { color: var(--ok); }
+      a.button { display: block; text-align: center; background: var(--accent-strong); color: white; text-decoration: none; border-radius: 10px; padding: 12px 18px; font-weight: 600; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Email verification</h1>
+      <div id="status" class="message">Verifying your email…</div>
+      <a id="loginLink" class="button" href="/ui/login" hidden>Go to login</a>
+    </div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const loginLink = document.getElementById('loginLink');
+      const token = new URLSearchParams(window.location.hash.slice(1)).get('token');
+      history.replaceState(null, '', window.location.pathname);
+
+      async function verify() {
+        if (!token) {
+          statusEl.textContent = 'This verification link is incomplete.';
+          statusEl.className = 'message error';
+          return;
+        }
+        try {
+          const response = await fetch('/v1/auth/verify-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.detail || 'Verification failed');
+          statusEl.textContent = 'Your email is verified. You can now log in.';
+          statusEl.className = 'message success';
+          loginLink.hidden = false;
+        } catch (error) {
+          statusEl.textContent = `${error.message}. Request a new link from the login page.`;
+          statusEl.className = 'message error';
+          loginLink.hidden = false;
+        }
+      }
+      verify();
+    </script>
+  </body>
+</html>

@@ -1,10 +1,12 @@
-import logging
+﻿import logging
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support.requests import REQUEST
+from tests.support.requests import REQUEST
 from fastapi import HTTPException
 from fastapi import Response
 from fastapi.testclient import TestClient
@@ -58,13 +60,13 @@ def _refresh(client: TestClient, refresh_token: str):
 
 
 def test_login_creates_access_and_refresh_sessions(store) -> None:
-    account = SimpleNamespace(id="user_1", password_hash="hash", must_change_password=False)
+    account = SimpleNamespace(id="user_1", password_hash="hash", must_change_password=False, email_verified_at=1)
     db = MagicMock()
     db.scalar.return_value = account
     cookie_response = Response()
 
     with patch("services.api.app.api.auth.verify_password", return_value=True):
-        response = login(LoginRequest(username_or_email="user_1", password="pw"), response=cookie_response, db=db)
+        response = login(LoginRequest(username_or_email="user_1", password="pw"), request=REQUEST, response=cookie_response, db=db)
 
     cookies = SimpleCookie()
     for header in cookie_response.headers.getlist("set-cookie"):

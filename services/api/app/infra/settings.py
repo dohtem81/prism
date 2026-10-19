@@ -45,5 +45,12 @@ class Settings(BaseSettings):
     rate_limit_messages_per_room_per_day: int = 5000
     rate_limit_translation_jobs_per_user_per_day: int = 2000
 
+    login_ip_limit: int = 20
+    login_ip_window_seconds: int = 900
+    login_lockout_threshold: int = 5
+    login_lockout_base_seconds: int = 60
+    login_lockout_max_seconds: int = 900
+    login_failure_window_seconds: int = 900
+
 
 settings = Settings()

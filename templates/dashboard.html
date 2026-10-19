@@ -1206,6 +1206,11 @@
         roomTitle.textContent = roomName || 'Room';
         roomIdNote.textContent = `Room ID: ${roomId} (share this so others can join)`;
         roomIdNote.style.display = 'block';
+        if (roomRole === 'observer') {
+          roomIdNote.textContent = `Room ID: ${roomId} (read-only: you are viewing as site admin)`;
+          document.querySelector('.composer').style.display = 'none';
+          document.getElementById('sendNote').textContent = 'Read-only view: site admins cannot post in rooms they are not members of.';
+        }
         if (roomRole === 'admin') {
           addMemberPanel.style.display = 'block';
           deleteRoomButton.style.display = 'inline-block';

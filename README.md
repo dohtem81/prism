@@ -137,10 +137,16 @@ docker compose -f deploy/compose/docker-compose.yml up --build
 
 **6. Open the webui**
 
-Navigate to `http://localhost:8000/` — the welcome page links to **Log in** or **Register**.
-Register an account, log in, then create or join a room from the dashboard. From there you can
+Navigate to `https://localhost/` (served by the Caddy proxy with a locally trusted/self-signed
+certificate; accept the browser warning). The welcome page links to **Log in** or **Register**.
+Set `REGISTRATION_SERVICE_URL=https://localhost` in `.env` so the register page reaches the
+registration service through the proxy. Registering sends a verification email: open it in
+Mailpit at `http://localhost:8025`, click the link, then log in (login is refused until the
+email is verified). After that, create or join a room from the dashboard. From there you can
 send messages, change your default language (Settings), and — if you're a room's owner — see
 live message/translation/cost stats in that room.
+
+Step-by-step screenshots: [docs/user-guide.md](docs/user-guide.md).
 
 ### Authentication and admin access
 
@@ -167,15 +173,24 @@ use `Authorization: Bearer`; query-string tokens are not accepted.
 Global operational endpoints under `/v1/admin` require the caller's ID in `ADMIN_USER_IDS`
 (default: `admin`). Set this to a JSON list, for example `ADMIN_USER_IDS=["admin","user-id"]`.
 Room metrics and room-management operations continue to require admin membership in the
-specific room.
+specific room. Users in `ADMIN_USER_IDS` can also list and open every room read-only (they
+cannot post in rooms they are not members of).
+
+New accounts must verify their email before logging in (single-use link, 24-hour expiry;
+**Resend verification email** on the login page). Registration and login are rate limited, and
+repeated failed logins lock the account with a growing delay. Outgoing mail uses the `SMTP_*`
+settings (default: the Mailpit container); set `PUBLIC_BASE_URL` to the public origin used in
+email links. Details and all tunables: [docs/auth-security-hardening-plan.md](docs/auth-security-hardening-plan.md).
 
 | Page | URL |
 |---|---|
-| Welcome (login / register) | `http://localhost:8000/` |
-| Register | `http://localhost:8000/ui/register` |
-| Login | `http://localhost:8000/ui/login` |
-| Dashboard (create/join room) | `http://localhost:8000/ui` |
-| Room chat | `http://localhost:8000/ui/rooms/{room_id}` |
+| Welcome (login / register) | `https://localhost/` |
+| Register | `https://localhost/ui/register` |
+| Verify email (from the emailed link) | `https://localhost/ui/verify` |
+| Login | `https://localhost/ui/login` |
+| Dashboard (create/join room) | `https://localhost/ui` |
+| Room chat | `https://localhost/ui/rooms/{room_id}` |
+| Mailpit (local email inbox) | `http://localhost:8025` |
 
 **7. Verify the API**
 
@@ -238,7 +253,7 @@ Room/message analytics (`/v1/admin/rooms/{room_id}/metrics`) and basic observabi
 **Working now:**
 - Room creation and membership management
 - User profiles with per-user language preferences
-- Standalone registration service (`POST /v1/register`) for email/username/password sign-up, with credentials stored in a separate Postgres schema (`auth.accounts`) linked to `users` by shared primary key, and a duplicate-check cache in Redis
+- Standalone registration service (`POST /v1/register`) for email/username/password sign-up, with credentials stored in a separate Postgres schema (`auth.accounts`) linked to `users` by shared primary key, and a duplicate-check cache in Redis; accounts must verify their email (local SMTP via Mailpit) before logging in, with rate limits and login lockout
 - Message send, persistence, and WebSocket fan-out to all room subscribers
 - Async translation via configurable LLM provider with live `MessageUpdated` push
 - Graceful degradation — provider failures mark the message `translation_unavailable` and push a status update without breaking chat

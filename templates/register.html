@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     <style>
       :root {
         --bg: #0f172a;
@@ -75,6 +76,7 @@
         <label for="password">Password</label>
         <input id="password" type="password" required minlength="8" maxlength="72" />
 
+        <div class="cf-turnstile" data-sitekey="0x4AAAAAAFbCMF2Qrm0P0NqZ" data-action="signup"></div>
         <button type="submit">Register</button>
       </form>
       <div id="formMessage" class="message"></div>
@@ -96,6 +98,7 @@
           email: document.getElementById('email').value.trim(),
           username: document.getElementById('username').value.trim(),
           password: document.getElementById('password').value,
+          turnstile_token: form.querySelector('[name="cf-turnstile-response"]')?.value || '',
         };
 
         try {
@@ -117,9 +120,9 @@
             throw new Error(body.detail || 'Registration failed');
           }
 
-          formMessage.textContent = 'Account created. Redirecting to login…';
+          formMessage.textContent = 'Account created. Check your email to verify your address, then log in. Redirecting…';
           formMessage.className = 'message success';
-          setTimeout(() => { window.location.href = '/ui/login'; }, 1000);
+          setTimeout(() => { window.location.href = '/ui/login'; }, 3000);
         } catch (error) {
           formMessage.textContent = error.message || 'Registration failed';
           formMessage.className = 'message error';

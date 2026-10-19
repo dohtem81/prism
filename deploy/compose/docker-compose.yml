@@ -102,6 +102,13 @@ services:
   redis:
     image: redis:7
 
+  # Local SMTP sink: accepts all mail on mailpit:1025 (internal) and shows it at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"
+
 volumes:
   postgres_data:
   caddy_data:

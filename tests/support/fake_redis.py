@@ -18,6 +18,11 @@ class FakeRedis:
     def exists(self, key):
         return int(key in self.strings or key in self.hashes)
 
+    def incr(self, key, amount=1):
+        value = int(self.strings.get(key, 0)) + amount
+        self.strings[key] = str(value)
+        return value
+
     def delete(self, key):
         removed = self.strings.pop(key, None) is not None or self.hashes.pop(key, None) is not None
         self.ttls.pop(key, None)

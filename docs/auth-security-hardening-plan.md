@@ -21,6 +21,36 @@ deployment settings that must be reviewed.
 Migration `0006_add_admin_password_rotation` adds the persisted password-rotation flag. Apply
 all migrations before starting the API with this version.
 
+## Registration, Email Verification and Abuse Controls
+
+- New accounts are unverified. Registration sends a verification email (single-use token,
+  24-hour expiry, only the SHA-256 is stored) and login returns 403 until the link is used.
+  Verification links point at `/ui/verify#token=...` on `PUBLIC_BASE_URL`.
+- Migration `0008_add_email_verification` adds `auth.accounts.email_verified_at` and
+  `auth.email_verification_tokens`. Accounts that existed before the migration are marked
+  verified; the built-in `admin` is created verified.
+- `POST /v1/auth/resend-verification` always answers 202 and is limited to 5/hour per IP and
+  per identifier. `POST /v1/auth/verify-email` is limited per IP.
+- Registration requires a Cloudflare Turnstile token (`TURNSTILE_SECRET`, `TURNSTILE_HOSTNAMES`)
+  and is limited to 5/hour and 20/day per IP and 50/hour per email domain
+  (`REGISTRATION_IP_PER_HOUR`, `REGISTRATION_IP_PER_DAY`, `REGISTRATION_DOMAIN_PER_HOUR`).
+- Login is limited per IP (`LOGIN_IP_LIMIT` per `LOGIN_IP_WINDOW_SECONDS`, default 20/15 min).
+  After `LOGIN_LOCKOUT_THRESHOLD` (5) failures an identifier is locked with an exponentially
+  growing delay (`LOGIN_LOCKOUT_BASE_SECONDS` 60 up to `LOGIN_LOCKOUT_MAX_SECONDS` 900); locked
+  attempts get 429 even with the right password. Unknown usernames are counted and checked in
+  constant time like real accounts. A success clears the counter. The same guard covers
+  `/v1/auth/password/change`.
+- Limiters share Redis and fail open if Redis is unavailable. `RATE_LIMIT_ENABLED=false`
+  disables them.
+- The registration service has no CORS by default (the browser reaches it through the same-origin
+  proxy). Cross-origin use needs an explicit `CORS_ALLOWED_ORIGINS` list; `*` is never used.
+- Client IPs come from `X-Forwarded-For` (Uvicorn `--proxy-headers`, trusted from any peer).
+  Only the reverse proxy may be reachable by clients; do not publish the api or registration
+  ports directly.
+- Outgoing mail uses plain SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_STARTTLS`, `SMTP_SENDER`). The Compose stack includes Mailpit, which accepts all mail on
+  `mailpit:1025` and shows it at http://localhost:8025 (bound to localhost only).
+
 ## Browser Sessions
 
 - Login and forced password change set `prism_access` and `prism_refresh` cookies. Cookies are
@@ -42,6 +72,8 @@ all migrations before starting the API with this version.
   `ADMIN_USER_IDS`. The default allowlist is `admin`.
 - Room metrics, membership changes, and room deletion use room-level admin membership checks;
   a global admin allowlist entry does not bypass room authorization.
+- Users in `ADMIN_USER_IDS` can list and open every room read-only (role `observer` for rooms they
+  are not members of): history, UI and WebSocket are allowed, but posting still requires membership.
 - The bootstrap account ID is the literal `admin`, so deployments should retain that ID in
   `ADMIN_USER_IDS` unless they intentionally change their bootstrap configuration.
 

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -379,3 +379,35 @@ def test_delete_room_removes_room_for_admin() -> None:
     db.commit.assert_called_once()
     assert manager_mock.publish_room_event.call_args.args[1]["type"] == "RoomDeleted"
     assert manager_mock.publish_user_event.call_count == 2
+
+
+def test_global_admin_lists_all_rooms_as_observer() -> None:
+    db = MagicMock()
+    now = datetime.now(timezone.utc)
+    member_room = Room(id="room_1", name="Mine", default_translation_mode="balanced", created_at=now)
+    other_room = Room(id="room_2", name="Other", default_translation_mode="balanced", created_at=now)
+    membership = RoomMember(room_id="room_1", user_id="admin", role="admin", preferred_lang="en", created_at=now)
+    db.scalars.side_effect = [
+        MagicMock(all=MagicMock(return_value=[membership])),
+        MagicMock(all=MagicMock(return_value=[member_room, other_room])),
+    ]
+    db.get.side_effect = [member_room]
+
+    with patch("services.api.app.api.rooms.unread_counts_for_user", return_value={}):
+        response = list_rooms(db=db, current_user_id="admin")
+
+    assert {(r.room_id, r.role) for r in response} == {("room_1", "admin"), ("room_2", "observer")}
+
+
+def test_global_admin_can_read_history_without_membership() -> None:
+    db = MagicMock()
+    room = Room(id="room_1", name="Alpha", default_translation_mode="balanced", created_at=datetime.now(timezone.utc))
+    db.get.side_effect = [room]
+    db.scalar.return_value = None
+    db.scalars.return_value.all.return_value = []
+    db.execute.return_value.all.return_value = []
+
+    with patch("services.api.app.api.rooms.compute_message_receipts", return_value={}):
+        response = list_room_messages(room_id="room_1", db=db, current_user_id="admin", limit=50)
+
+    assert response == []

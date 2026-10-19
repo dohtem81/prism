@@ -16,6 +16,14 @@ class LoginResponse(BaseModel):
     user_id: str
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=256)
+
+
+class ResendVerificationRequest(BaseModel):
+    username_or_email: str = Field(min_length=1, max_length=255)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1, max_length=4096)
 

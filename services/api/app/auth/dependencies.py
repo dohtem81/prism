@@ -229,7 +229,11 @@ def get_current_user_id(
     return resolve_authenticated_user_id(resolved_token)
 
 
+def is_global_admin(user_id: str) -> bool:
+    return user_id in settings.admin_user_ids
+
+
 def get_current_admin_user_id(current_user_id: str = Depends(get_current_user_id)) -> str:
-    if current_user_id not in settings.admin_user_ids:
+    if not is_global_admin(current_user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin authorization required")
     return current_user_id

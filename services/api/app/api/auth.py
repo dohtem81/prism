@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from services.api.app.auth import login_guard
 from services.api.app.auth.dependencies import (
     ACCESS_COOKIE_NAME,
     REFRESH_COOKIE_NAME,
@@ -15,17 +16,22 @@ from services.api.app.auth.dependencies import (
 from services.api.app.infra.db import get_db
 from services.api.app.infra.settings import settings
 from shared.db.models import RegisteredAccount
+from shared.email_verification import consume_token, issue_token, send_verification_email
+from shared.logging_utils import get_logger
 from shared.schemas.auth import (
     LoginRequest,
     LoginResponse,
     LogoutRequest,
     PasswordChangeRequest,
     RefreshRequest,
+    ResendVerificationRequest,
     TokenPairResponse,
+    VerifyEmailRequest,
 )
 from shared.security import hash_password, verify_password
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
+logger = get_logger("prism.api.auth")
 
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
@@ -50,15 +56,22 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+def login(
+    payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)
+) -> LoginResponse:
+    login_guard.enforce_attempt_allowed(request, payload.username_or_email)
     account = db.scalar(
         select(RegisteredAccount).where(
             (RegisteredAccount.email == payload.username_or_email)
             | (RegisteredAccount.username == payload.username_or_email)
         )
     )
-    if account is None or not verify_password(payload.password, account.password_hash):
+    if not login_guard.credentials_valid(account, payload.password, verify_password):
+        login_guard.record_failure(payload.username_or_email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    login_guard.record_success(payload.username_or_email)
+    if account.email_verified_at is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verify your email before logging in")
     if account.must_change_password:
         raise HTTPException(
             status_code=status.HTTP_428_PRECONDITION_REQUIRED,
@@ -70,16 +83,59 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     return LoginResponse(user_id=account.id)
 
 
-@router.post("/password/change", response_model=LoginResponse)
-def change_password(payload: PasswordChangeRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+@router.post("/verify-email")
+def verify_email(payload: VerifyEmailRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    login_guard.enforce_budget(request, "verify_email", 20, 900)
+    if consume_token(db, payload.token) is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+    db.commit()
+    return {"status": "verified"}
+
+
+def _send_verification_email_safely(email: str, username: str, token: str) -> None:
+    try:
+        send_verification_email(email, username, token)
+    except Exception:
+        logger.exception("verification_email_failed")
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+def resend_verification(
+    payload: ResendVerificationRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    login_guard.enforce_budget(request, "resend_verification", 5, 3600, payload.username_or_email)
     account = db.scalar(
         select(RegisteredAccount).where(
             (RegisteredAccount.email == payload.username_or_email)
             | (RegisteredAccount.username == payload.username_or_email)
         )
     )
-    if account is None or not verify_password(payload.current_password, account.password_hash):
+    if account is not None and account.email_verified_at is None:
+        token = issue_token(db, account.id)
+        db.commit()
+        background_tasks.add_task(_send_verification_email_safely, account.email, account.username, token)
+    # Same answer for unknown, verified and unverified accounts so this cannot be used to probe for accounts.
+    return {"status": "accepted"}
+
+
+@router.post("/password/change", response_model=LoginResponse)
+def change_password(
+    payload: PasswordChangeRequest, request: Request, response: Response, db: Session = Depends(get_db)
+) -> LoginResponse:
+    login_guard.enforce_attempt_allowed(request, payload.username_or_email)
+    account = db.scalar(
+        select(RegisteredAccount).where(
+            (RegisteredAccount.email == payload.username_or_email)
+            | (RegisteredAccount.username == payload.username_or_email)
+        )
+    )
+    if not login_guard.credentials_valid(account, payload.current_password, verify_password):
+        login_guard.record_failure(payload.username_or_email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    login_guard.record_success(payload.username_or_email)
     if not account.must_change_password:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Password change is not required")
     if payload.current_password == payload.new_password:
