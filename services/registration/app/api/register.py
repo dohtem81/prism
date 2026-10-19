@@ -66,6 +66,7 @@ def register_account(
     )
     # Same id as the account: rooms/messages reference users.id regardless of auth storage.
     db.add(User(id=user_id, display_name=payload.username, created_at=now))
+    db.flush()
     db.add(account)
     try:
         db.commit()

@@ -43,9 +43,8 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
-    environment:
-      # Public hostname for automatic HTTPS; set DOMAIN in .env. Defaults to localhost (self-signed).
-      DOMAIN: ${DOMAIN:-localhost}
+    env_file:
+      - ../../.env
     ports:
       - "80:80"
       - "443:443"
@@ -76,10 +75,11 @@ services:
 
   postgres:
     image: postgres:16
+    env_file:
+      - ../../.env
     environment:
       POSTGRES_DB: prism
       POSTGRES_USER: prism
-      POSTGRES_PASSWORD: prism
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -90,9 +90,10 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management
+    env_file:
+      - ../../.env
     environment:
       RABBITMQ_DEFAULT_USER: prism
-      RABBITMQ_DEFAULT_PASS: prism
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 10s
