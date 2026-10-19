@@ -20,6 +20,7 @@ def ensure_default_admin_account() -> None:
         now = datetime.now(timezone.utc)
         if db.get(User, "admin") is None:
             db.add(User(id="admin", display_name="Administrator", created_at=now))
+            db.flush()
         db.add(
             RegisteredAccount(
                 id="admin",
