@@ -10,6 +10,7 @@ For setup, quick start, and project overview see the [root README](../README.md)
 
 | Document | What it covers |
 |---|---|
+| [User Guide](user-guide.md) | Screenshot walkthrough: register, log in, create a room, add a user, join a room |
 | [Architecture Overview](architecture-overview.md) | System topology, state ownership, runtime containers, and degraded-mode behavior |
 | [Components and Responsibilities](components-and-responsibilities.md) | Component contracts and boundaries |
 | [Data Flow and Contracts](data-flow-and-contracts.md) | Message lifecycle, event schemas, REST and queue contracts |
