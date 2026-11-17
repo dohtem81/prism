@@ -13,6 +13,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     preferred_lang: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
@@ -79,6 +80,22 @@ class RoomMember(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+class DemoBotJob(Base):
+    __tablename__ = "demo_bot_jobs"
+    __table_args__ = (
+        UniqueConstraint("kind", "source_id", name="uq_demo_bot_job_source"),
+        Index("ix_demo_bot_jobs_pending", "status", "next_attempt_at", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (
@@ -92,6 +109,8 @@ class Message(Base):
     source_lang: Mapped[str] = mapped_column(String(8), nullable=False)
     content_original: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="original_only")
+    translation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    translation_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -149,7 +168,10 @@ class RoomEvent(Base):
 
 class OutboxEvent(Base):
     __tablename__ = "outbox_events"
-    __table_args__ = (Index("ix_outbox_events_status_id", "status", "id"),)
+    __table_args__ = (
+        Index("ix_outbox_events_status_id", "status", "id"),
+        Index("ix_outbox_events_aggregate_event", "aggregate_type", "aggregate_id", "event_type"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)

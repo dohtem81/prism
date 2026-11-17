@@ -6,6 +6,8 @@ services:
       dockerfile: deploy/docker/api.Dockerfile
     env_file:
       - ../../.env
+    environment:
+      DEMO_LOCAL_MODEL: ${DEMO_LOCAL_MODEL:-${DEMO_DEFAULT_LOCAL_MODEL:-qwen2.5:1.5b}}
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,6 +29,50 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+  demo-bot:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/demo-bot.Dockerfile
+    env_file:
+      - ../../.env
+    environment:
+      DEMO_LOCAL_MODEL: ${DEMO_LOCAL_MODEL:-${DEMO_DEFAULT_LOCAL_MODEL:-qwen2.5:1.5b}}
+    volumes:
+      - ../../docs:/docs:ro
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      ollama-model:
+        condition: service_completed_successfully
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  ollama-model:
+    image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'ollama show "$$DEMO_LOCAL_MODEL" || ollama pull "$$DEMO_LOCAL_MODEL"'
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      DEMO_LOCAL_MODEL: ${DEMO_LOCAL_MODEL:-${DEMO_DEFAULT_LOCAL_MODEL:-qwen2.5:1.5b}}
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
 
   registration:
     build:
@@ -114,3 +160,4 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  ollama_models:

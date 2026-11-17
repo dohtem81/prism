@@ -4,7 +4,44 @@ Step-by-step guide to the Prism web app: registering, logging in, creating a roo
 
 The examples use three demo accounts: **alice** (room owner), **bob** (added by Alice) and **carol** (joins with the room ID).
 
-Open the app at `https://localhost` when running the local Docker stack (accept the self-signed certificate warning).
+Start the local Docker stack with `sh scripts/start-demo.sh`, then open `http://localhost`.
+The launcher uses a Docker-accessible NVIDIA GPU when available and otherwise uses the CPU;
+see the [README](../README.md#quick-start) for setup and model selection.
+
+## Try the demo
+
+Choose **Try the demo**, enter a name and a two-letter language code (default `en`), and
+enter the shared **General** room. No email or registration is needed. Demo guests cannot
+create or join other rooms. Registered users can join General using `room_demo_general`.
+Use **Settings** to change your language; new messages are translated for that language.
+Prism Bot is an AI participant that greets guests and responds in French about general
+topics or Prism documentation. The bot generates replies with local Ollama; the worker
+translates messages using the configured translation provider, such as OpenRouter. That
+provider receives message text, including documentation-derived bot replies, so do not
+share sensitive information in the demo. Responses may be slow or inaccurate; a stronger
+model can improve quality.
+Guest names, room memberships, and messages are stored and remain after logout. Once the
+session expires or you log out, entering again creates a new guest identity.
+The progress panel above the chat follows your latest sent message. After saving, the original
+message publication and translation job dispatch are independent paths; the original is
+published to connected room subscribers without waiting for translation. The worker processes
+the job, saves the result, and publishes a message update to the room. Publication means the
+event was sent to the room's real-time channel, not that every browser received or displayed it.
+The separate seen count uses read receipts from other participants; it does not distinguish an
+original message from a later translation. Offline participants can load saved messages later.
+Worker pickup means the job started; if a worker stops unexpectedly, the panel may continue
+waiting for a result. The original message remains available even if translation fails.
+The Ollama indicator shows the CPU and GPU actually used by the loaded bot model, including
+mixed CPU/GPU use. When the model is unloaded or status is unavailable, neither is marked
+active. Each demo message also creates a bot reply job: its separate progress card shows
+queued, processing in Ollama, retrying, or completed. Bot replies may take longer on CPU.
+The bot reply has its own original-publication, translation queue, worker, and update-publication
+tiles. These show the reply's processing for the room, not confirmation that a specific
+participant received a translation. If the reply is already in French and no other languages
+are needed, the worker can complete without requesting a translation.
+Each progress tile shows when this browser last observed its displayed status, in local time.
+These observation times reset when the page is refreshed and may be later than the actual
+server-side event.
 
 ## 1. Register
 
@@ -86,11 +123,11 @@ Rooms you belong to are listed in the sidebar and in the dashboard's room select
 The images are captured by a Playwright script against the local stack:
 
 ```powershell
-docker compose -f deploy/compose/docker-compose.yml up -d
+sh scripts/start-demo.sh
 # one-time: install Playwright in any folder
 npm install playwright; npx playwright install chromium
 $env:NODE_PATH="<that folder>\node_modules"
 node docs/user-guide/capture-screenshots.cjs
 ```
 
-The register page posts to `REGISTRATION_SERVICE_URL`; set `REGISTRATION_SERVICE_URL=https://localhost` in `.env` when using the Caddy proxy. Re-running the script reuses existing demo accounts and creates a new room. Newly registered accounts must be verified (via the link in Mailpit) before the script can log in as them.
+The register page posts to `REGISTRATION_SERVICE_URL`; set `REGISTRATION_SERVICE_URL=http://localhost` in `.env` when using the local Caddy proxy. Re-running the script reuses existing demo accounts and creates a new room. Newly registered accounts must be verified (via the link in Mailpit) before the script can log in as them.

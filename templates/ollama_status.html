@@ -1,0 +1,41 @@
+<div class="ollama-status" role="status" aria-live="polite">
+  <strong>Prism Bot · Ollama</strong>
+  <div class="ollama-processors" aria-label="Ollama processor">
+    <span id="ollamaCpu">CPU powered</span>
+    <span id="ollamaGpu">GPU powered</span>
+  </div>
+  <small id="ollamaDetail">Checking Ollama status…</small>
+</div>
+<style>
+  .ollama-status { margin: 12px 0; padding: 10px 12px; border: 1px solid #475569; border-radius: 9px; color: #cbd5e1; font-size: .85rem; }
+  .ollama-processors { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .ollama-processors span { padding: 4px 8px; border: 1px solid #475569; border-radius: 12px; color: #94a3b8; }
+  .ollama-processors span.active { border-color: #4ade80; color: #86efac; background: rgba(74,222,128,.1); }
+</style>
+<script>
+  async function updateOllamaStatus() {
+    try {
+      const response = await fetch('/v1/demo/ollama-status', {cache: 'no-store'});
+      if (!response.ok) throw new Error(`Ollama status unavailable (${response.status})`);
+      const data = await response.json();
+      const details = {
+        cpu: 'Active: CPU. Replies may take longer.',
+        gpu: 'Active: GPU.',
+        mixed: 'Active: CPU and GPU.',
+        idle: 'Model is not loaded; processor will be shown when it runs.',
+        unavailable: 'Ollama status unavailable. Retrying…',
+      };
+      if (!Object.hasOwn(details, data.processor)) throw new Error('Unrecognized Ollama status');
+      document.getElementById('ollamaCpu').classList.toggle('active', ['cpu', 'mixed'].includes(data.processor));
+      document.getElementById('ollamaGpu').classList.toggle('active', ['gpu', 'mixed'].includes(data.processor));
+      document.getElementById('ollamaDetail').textContent = details[data.processor];
+    } catch (error) {
+      console.error('Failed to load Ollama status', error);
+      document.getElementById('ollamaCpu').classList.remove('active');
+      document.getElementById('ollamaGpu').classList.remove('active');
+      document.getElementById('ollamaDetail').textContent = 'Ollama status unavailable. Retrying…';
+    }
+    setTimeout(updateOllamaStatus, 5000);
+  }
+  updateOllamaStatus();
+</script>

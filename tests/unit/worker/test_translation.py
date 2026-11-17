@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from services.worker.app.tasks import translation
 from services.worker.app.tasks.translation import (
     OpenAITranslationProvider,
     _cache_key,
@@ -11,7 +12,14 @@ from services.worker.app.tasks.translation import (
     run_translation_task,
     translate_message,
 )
-from shared.db.models import OutboxEvent
+from shared.db.models import MessageTranslation, OutboxEvent
+from shared.demo import DEMO_ROOM_ID
+
+
+@pytest.fixture(autouse=True)
+def isolate_progress_recording():
+    with patch("services.worker.app.tasks.translation._record_translation_progress") as recorder:
+        yield recorder
 
 
 def test_cache_key_is_deterministic() -> None:
@@ -46,12 +54,14 @@ def test_build_translation_provider_rejects_unknown_provider() -> None:
         build_translation_provider(provider_name="unknown", fallback_provider_name="")
 
 
-def test_run_translation_task_sends_failed_job_to_dead_letter_queue() -> None:
+def test_run_translation_task_sends_failed_job_to_dead_letter_queue(isolate_progress_recording: MagicMock) -> None:
     with patch("services.worker.app.tasks.translation._run_translation_task", side_effect=TimeoutError("provider timeout")):
         with patch("services.worker.app.tasks.translation.celery_app.send_task") as send_task_mock:
             result = run_translation_task("msg_1", "room_1", "pl", "Czesc")
 
             assert result["status"] == "dead_letter"
+            assert isolate_progress_recording.call_args_list[0].kwargs == {"failed": False}
+            assert isolate_progress_recording.call_args_list[1].kwargs == {"failed": True}
             send_task_mock.assert_called_once_with(
                 "services.worker.app.tasks.translation.dead_letter_translation",
                 kwargs={
@@ -156,12 +166,16 @@ def test_translate_message_handles_no_target_languages(
 @patch("services.worker.app.tasks.translation.redis_client")
 @patch("services.worker.app.tasks.translation.build_translation_provider")
 @patch("services.worker.app.tasks.translation.SessionLocal")
+@pytest.mark.parametrize("room_id", ["room_1", DEMO_ROOM_ID])
 def test_translate_message_persists_and_dispatches_update_outbox(
     session_local_mock: MagicMock,
     provider_factory_mock: MagicMock,
     redis_client_mock: MagicMock,
     dispatch_mock: MagicMock,
+    room_id: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(translation.settings, "translation_provider", "openrouter")
     provider = MagicMock()
     provider.translate.return_value = ("Hallo", 12, 7)
     provider_factory_mock.return_value = provider
@@ -177,7 +191,7 @@ def test_translate_message_persists_and_dispatches_update_outbox(
     message.content_original = "Czesc"
 
     room = MagicMock()
-    room.id = "room_1"
+    room.id = room_id
     room.default_translation_mode = "balanced"
 
     db = MagicMock()
@@ -205,7 +219,7 @@ def test_translate_message_persists_and_dispatches_update_outbox(
         "processed": len(ids), "processed_ids": ids, "failed": 0
     }
 
-    result = translate_message("msg_1", "room_1", "pl", "Czesc")
+    result = translate_message("msg_1", room_id, "pl", "Czesc")
 
     provider_factory_mock.assert_called_once()
     provider.translate.assert_called_once_with(
@@ -214,6 +228,8 @@ def test_translate_message_persists_and_dispatches_update_outbox(
         target_lang="de",
     )
     assert result["status"] == "translated"
+    translation_row = next(call.args[0] for call in db.add.call_args_list if isinstance(call.args[0], MessageTranslation))
+    assert translation_row.provider == "openrouter"
     outbox_event = next(call.args[0] for call in db.add.call_args_list if isinstance(call.args[0], OutboxEvent))
     assert outbox_event.status == "pending"
     assert outbox_event.event_type == "MessageUpdated"

@@ -11,11 +11,14 @@ sequenceDiagram
     participant W as Celery Worker
     participant LLM as Translation Provider
 
-    C->>A: POST /v1/rooms/{id}/messages
-    A->>PG: persist message (status: original_only, version: 1)
-    A-->>C: 201 Created
-    A-)C: WebSocket — MessageCreated
-    A-)MQ: TranslationRequested job
+    C->>A: POST /v1/messages
+    A->>PG: persist original, room event and outbox entries
+    par Original publication
+        A-)C: Redis / WebSocket — MessageCreated
+    and Translation dispatch
+        A-)MQ: TranslationRequested job
+    end
+    A-->>C: Send response with message ID
 
     MQ-)W: consume job
     W->>LLM: translate to each target language
@@ -27,7 +30,11 @@ sequenceDiagram
 
 **Degraded path (provider unavailable):**
 
-Steps 1–5 are unchanged — the message is delivered in the original language before translation starts. The worker retries according to the retry policy. On exhaustion or permanent failure, it marks the message `translation_unavailable` and emits a final `MessageUpdated` with that status. Chat is never blocked.
+The original is saved independently of translation. A failed translation can produce
+`translation_unavailable` and a `MessageUpdated` event; other unexpected task failures may
+be sent to the dead-letter queue instead. An outbox dispatch failure remains pending for
+retry. Publishing to Redis does not confirm that a recipient's browser received or displayed
+the event.
 
 ---
 
@@ -36,12 +43,21 @@ Steps 1–5 are unchanged — the message is delivered in the original language 
 1. Client calls the REST message endpoint.
 2. API validates auth and room membership.
 3. API persists the original message with `version = 1` and `status = original_only`.
-4. API broadcasts a `MessageCreated` event to all connected room subscribers.
-5. API queues a `TranslationRequested` job.
+4. An outbox dispatcher publishes `MessageCreated` to the room's Redis channel.
+5. Independently, the dispatcher sends a `TranslationRequested` job to the queue. A failed
+   original-event publication does not prevent the translation job from being dispatched.
 6. Worker computes target languages from room member preferences and translates content.
 7. Worker persists translations and updates message version and status.
-8. Worker broadcasts a `MessageUpdated` event to the room.
-9. Clients patch the existing message in place by `message_id`.
+8. The worker creates an outbox event; the dispatcher publishes `MessageUpdated` to the room.
+9. Connected clients receiving the event patch the existing message in place by `message_id`.
+   Other clients can retrieve saved messages from room history. Read receipts indicate that a
+   participant marked a message seen, but do not distinguish original from translated content.
+
+In General, the demo bot generates French replies locally with Ollama and sends them through
+this same message flow. The translation worker uses the configured provider for both guest
+and bot messages. If configured for OpenRouter, message text, including documentation-derived
+bot replies, is sent to OpenRouter for translation; the retrieved documentation excerpts used
+to generate the replies are not themselves sent by the bot.
 
 > **Note:** Room events are published to Redis (`room:{room_id}:events`). Every API instance subscribes for rooms it has local WebSocket clients in and delivers only to those clients, so multiple API replicas work.
 

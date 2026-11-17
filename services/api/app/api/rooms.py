@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,6 +14,7 @@ from services.api.app.infra.rate_limit import rate_limiter
 from services.api.app.infra.settings import settings
 from services.api.app.realtime.websocket_gateway import manager
 from shared.db.models import Message, MessageReceipt, MessageTranslation, Room, RoomMember, User
+from shared.demo import DEMO_ROOM_ID
 from shared.receipts import compute_message_receipts, unread_counts_for_user
 from shared.schemas.rooms import (
     CreateRoomRequest,
@@ -46,6 +48,8 @@ def create_room(
     db: Session = Depends(get_db),
     current_user_id: str = Depends(get_current_user_id),
 ) -> CreateRoomResponse:
+    if db.scalar(select(User.is_demo).where(User.id == current_user_id)) is True:
+        raise HTTPException(status_code=403, detail="Demo users cannot create rooms")
     rate_limiter.enforce(
         f"rl:user:{current_user_id}:rooms_create",
         settings.rate_limit_room_creation_per_user_per_hour,
@@ -154,6 +158,9 @@ def upsert_membership(
         )
         raise HTTPException(status_code=403, detail="Only room admins can manage members")
 
+    if room_id != DEMO_ROOM_ID and db.scalar(select(User.is_demo).where(User.id == payload.user_id)) is True:
+        raise HTTPException(status_code=403, detail="Demo users can only join the General room")
+
     rate_limiter.enforce(
         f"rl:user:{current_user_id}:room_members",
         settings.rate_limit_room_membership_per_admin_per_minute,
@@ -196,6 +203,14 @@ def join_room(
     current_user_id: str = Depends(get_current_user_id),
 ) -> RoomMembershipResponse:
     """Self-service join, unlike POST /members which requires the caller to already be a room admin."""
+    if room_id != DEMO_ROOM_ID and db.scalar(select(User.is_demo).where(User.id == current_user_id)) is True:
+        raise HTTPException(status_code=403, detail="Demo users can only join the General room")
+    if room_id == DEMO_ROOM_ID:
+        user = db.scalar(select(User).where(User.id == current_user_id))
+        if user is not None and user.is_demo:
+            if not re.fullmatch(r"[a-z]{2}", payload.preferred_lang):
+                raise HTTPException(status_code=422, detail="Language must be a two-letter lowercase code")
+            user.preferred_lang = payload.preferred_lang
     room = db.get(Room, room_id)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")

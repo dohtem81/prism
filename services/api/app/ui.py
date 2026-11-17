@@ -10,7 +10,8 @@ from services.api.app.auth.dependencies import get_current_user_id, is_global_ad
 from services.api.app.auth.security_events import security_events
 from services.api.app.infra.db import get_db
 from services.api.app.infra.settings import settings
-from shared.db.models import Room, RoomMember
+from shared.db.models import Room, RoomMember, User
+from shared.demo import DEMO_ROOM_ID
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 root_router = APIRouter(tags=["ui"])
@@ -51,6 +52,13 @@ async def login_page(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/demo", response_class=HTMLResponse)
+async def demo_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "demo.html", {"request": request, "title": "Prism · Demo", "demo_room_id": DEMO_ROOM_ID}
+    )
+
+
 @router.get("/verify", response_class=HTMLResponse)
 async def verify_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -66,13 +74,18 @@ async def verify_page(request: Request) -> HTMLResponse:
 async def dashboard_page(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    user = db.get(User, current_user_id)
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "title": "Prism Dashboard",
             "user_id": current_user_id,
+            "is_demo": user.is_demo if user else False,
+            "display_name": user.display_name if user else None,
+            "user_preferred_lang": user.preferred_lang if user else None,
             "access_token_ttl_seconds": settings.access_token_ttl_minutes * 60,
         },
     )
@@ -97,6 +110,7 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
         )
         raise HTTPException(status_code=403, detail="User is not a room member")
 
+    user = db.get(User, current_user_id)
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -107,6 +121,9 @@ async def room_page(request: Request, room_id: str, db: Session = Depends(get_db
             "room_role": "observer" if observer else membership.role,
             "room_preferred_lang": None if observer else membership.preferred_lang,
             "user_id": current_user_id,
+            "is_demo": user.is_demo if user else False,
+            "display_name": user.display_name if user else None,
+            "user_preferred_lang": user.preferred_lang if user else None,
             "access_token_ttl_seconds": settings.access_token_ttl_minutes * 60,
         },
     )

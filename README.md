@@ -2,7 +2,7 @@
 
 Prism is a real-time chat platform where messages are automatically translated server-side so every participant reads the conversation in their own language — without any delay to the sender.
 
-When a message is sent, it is delivered immediately to all connected clients. Translation runs asynchronously in the background and is pushed to every client as a live update the moment it completes. If the translation provider is unavailable, the message stays readable in the original language and the status is surfaced to the UI — the chat never blocks.
+When a message is sent, its original is saved and published to connected room clients without waiting for translation. Translation runs asynchronously in the background, and its result is published as a live update. Publication does not guarantee every client received the event; saved messages are available from room history. If translation is unavailable, the original remains readable and the status is surfaced to the UI — the chat never blocks.
 
 ![Prism demo](docs/imgs/prim_demo.gif)
 
@@ -117,34 +117,55 @@ OPENROUTER_API_KEY=your_key_here
 
 > If port 8000 is already in use, set `API_PORT` in `.env` to a free port (e.g. `8010`).
 
-**3. Start the database and infrastructure dependencies**
+**3. Start Prism, selecting GPU or CPU automatically**
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up -d postgres rabbitmq redis
+sh scripts/start-demo.sh
 ```
 
-**4. Run database migrations**
+This starts Ollama, downloads the selected bot model if needed, applies migrations, and
+starts the application. Docker and Docker Compose must be running; the first model download
+requires internet access and disk space.
 
-```bash
-docker compose -f deploy/compose/docker-compose.yml run --build --rm api alembic -c migrations/alembic.ini upgrade head
-```
+**4. Open the webui**
 
-**5. Start the application services**
-
-```bash
-docker compose -f deploy/compose/docker-compose.yml up --build
-```
-
-**6. Open the webui**
-
-Navigate to `https://localhost/` (served by the Caddy proxy with a locally trusted/self-signed
-certificate; accept the browser warning). The welcome page links to **Log in** or **Register**.
-Set `REGISTRATION_SERVICE_URL=https://localhost` in `.env` so the register page reaches the
+Navigate to `http://localhost/`. The welcome page links to **Log in**, **Register**, or **Try the demo**.
+Set `REGISTRATION_SERVICE_URL=http://localhost` in `.env` so the register page reaches the
 registration service through the proxy. Registering sends a verification email: open it in
 Mailpit at `http://localhost:8025`, click the link, then log in (login is refused until the
 email is verified). After that, create or join a room from the dashboard. From there you can
 send messages, change your default language (Settings), and — if you're a room's owner — see
 live message/translation/cost stats in that room.
+
+**Try the demo** opens the shared **General** room without registration or email. Enter a
+display name and a two-letter language code (English `en` is the default); the language can
+also be changed under Settings. Demo users can only use General and cannot create rooms.
+Registered users can join it using the room ID `room_demo_general`. Names, memberships, and
+messages are stored and visible to room participants after the guest session ends. Logging
+out or letting the session expire means starting a new guest identity next time.
+
+The demo includes **Prism Bot**, a French-speaking AI participant that greets guests and
+answers questions about general topics or the documentation. It runs in a separate service
+with a read-only documentation mount. Ollama generates the bot's replies locally; the worker
+translates all room messages through the configured translation provider (OpenRouter when
+`TRANSLATION_PROVIDER=openrouter`). The provider receives message text, including bot replies
+that may contain information from the documentation. Do not share sensitive information in
+the demo. `sh scripts/start-demo.sh` probes Docker
+for an NVIDIA GPU and selects `qwen2.5:7b` when available, or `qwen2.5:1.5b` on CPU.
+NVIDIA GPU use requires compatible host drivers and Docker GPU support. Other GPUs are not
+automatically exposed to Docker; on macOS, Docker runs this setup on CPU.
+
+Set `DEMO_LOCAL_MODEL` in `.env` or the shell to override the bot model. The launcher downloads
+that Ollama model when missing. A plain `docker compose`
+invocation uses CPU and defaults to `qwen2.5:1.5b`. Compose waits for Ollama to start and installs the
+selected model if it is missing, before starting the bot. The initial
+download can take time and requires internet access; if it fails, check
+`docker compose -f deploy/compose/docker-compose.yml logs ollama-model` and retry `up`.
+To use the GPU without the launcher, include
+`deploy/compose/docker-compose.gpu.yml` as a second Compose file and set the desired model.
+CPU inference can be slow, and the smaller model may produce less accurate answers. Bot jobs
+retry after errors; inspect `docker compose -f deploy/compose/docker-compose.yml logs demo-bot`
+if replies are delayed.
 
 Step-by-step screenshots: [docs/user-guide.md](docs/user-guide.md).
 
@@ -284,5 +305,3 @@ This project is a working foundation for anyone building a real-time multilingua
 If you want to build on it, the natural next steps are listed above under *Planned*. Everything is Docker-first, the service boundaries are clean, and the worker's translation provider is fully abstracted behind a config-driven interface — so swapping models or providers requires no code changes.
 
 Pull requests and forks are welcome. If you extend it in an interesting direction, feel free to open an issue to share what you built.
-
-

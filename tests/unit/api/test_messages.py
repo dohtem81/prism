@@ -6,8 +6,9 @@ from pydantic import ValidationError
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from services.api.app.api.messages import send_message
-from shared.db.models import Message, OutboxEvent
+from services.api.app.api.messages import message_progress, send_message
+from shared.db.models import DemoBotJob, Message, OutboxEvent
+from shared.demo import DEMO_ROOM_ID
 from shared.outbox_dispatcher import dispatch_outbox_ids, dispatch_pending_outbox
 from shared.schemas.message_events import SendMessage
 
@@ -20,6 +21,123 @@ def _payload() -> SendMessage:
         source_lang="pl",
         content_original="Czesc",
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "started", "failed", "outbox", "expected"),
+    [
+        ("original_only", False, False, "pending", "dispatch_pending"),
+        ("original_only", False, False, "processed", "queued"),
+        ("original_only", False, False, None, "unknown"),
+        ("original_only", True, False, "processed", "worker_started"),
+        ("original_only", True, True, "processed", "failed"),
+        ("translated", True, False, "processed", "completed"),
+        ("partially_translated", True, False, "processed", "partial"),
+        ("translation_unavailable", True, False, "processed", "failed"),
+        ("unexpected", False, False, "processed", "unknown"),
+    ],
+)
+def test_message_progress_reports_confirmed_stage(status, started, failed, outbox, expected) -> None:
+    db = MagicMock()
+    now = datetime.now(timezone.utc)
+    message = Message(
+        id="msg_1", status=status, translation_started_at=now if started else None,
+        translation_failed_at=now if failed else None,
+    )
+    db.scalar.side_effect = [message, 0]
+    db.execute.return_value.all.return_value = [("TranslationRequested", outbox)]
+    assert message_progress("msg_1", db, "user_1").stage == expected
+
+
+@pytest.mark.parametrize(
+    ("events", "status", "expected_original", "expected_update"),
+    [
+        ([("MessageCreated", "pending")], "original_only", "pending", "not_ready"),
+        ([("MessageCreated", "processed"), ("MessageUpdated", "pending")], "translated", "published", "pending"),
+        ([("MessageCreated", "processed"), ("MessageUpdated", "processed")], "translated", "published", "published"),
+        ([], "translated", "unknown", "unknown"),
+        ([("MessageCreated", "unexpected"), ("MessageUpdated", "unexpected")], "translated", "unknown", "unknown"),
+    ],
+)
+def test_message_progress_reports_independent_delivery_paths(events, status, expected_original, expected_update) -> None:
+    db = MagicMock()
+    db.scalar.side_effect = [Message(id="msg_1", status=status), 2]
+    db.execute.return_value.all.return_value = events
+    progress = message_progress("msg_1", db, "user_1")
+    assert progress.original_publication == expected_original
+    assert progress.update_publication == expected_update
+    assert progress.other_readers == 2
+
+
+def test_message_progress_rejects_missing_or_unauthorized_message() -> None:
+    db = MagicMock()
+    db.scalar.return_value = None
+    with pytest.raises(HTTPException) as exc:
+        message_progress("msg_1", db, "other")
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("job_status", "attempts", "processing", "expected"),
+    [("pending", 0, False, "queued"), ("pending", 0, True, "processing"),
+     ("pending", 1, False, "retrying"), ("completed", 0, False, "completed"),
+     ("other", 0, False, "unknown")],
+)
+def test_message_progress_reports_bot_state(job_status, attempts, processing, expected) -> None:
+    db = MagicMock()
+    db.scalar.side_effect = [
+        Message(id="msg_1", room_id=DEMO_ROOM_ID, status="original_only"),
+        0,
+        DemoBotJob(kind="reply", source_id="msg_1", status=job_status, attempts=attempts), None,
+    ]
+    db.execute.return_value.all.return_value = []
+    with patch("services.api.app.api.messages.redis_client.exists", return_value=processing):
+        assert message_progress("msg_1", db, "user_1").bot_status == expected
+
+
+def test_message_progress_reports_unknown_if_bot_progress_redis_fails() -> None:
+    from redis.exceptions import ConnectionError
+    db = MagicMock()
+    db.scalar.side_effect = [
+        Message(id="msg_1", room_id=DEMO_ROOM_ID, status="original_only"),
+        0, DemoBotJob(kind="reply", source_id="msg_1", status="pending", attempts=0), None,
+    ]
+    db.execute.return_value.all.return_value = []
+    with patch("services.api.app.api.messages.redis_client.exists", side_effect=ConnectionError("offline")):
+        assert message_progress("msg_1", db, "user_1").bot_status == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("status", "started", "failed", "event_status", "stage"),
+    [
+        ("original_only", False, False, "pending", "dispatch_pending"),
+        ("original_only", False, False, "processed", "queued"),
+        ("original_only", True, False, "processed", "worker_started"),
+        ("translated", True, False, "processed", "completed"),
+        ("partially_translated", True, False, "processed", "partial"),
+        ("translation_unavailable", True, False, "processed", "failed"),
+        ("original_only", True, True, "processed", "failed"),
+    ],
+)
+def test_message_progress_includes_bot_reply_translation(status, started, failed, event_status, stage) -> None:
+    now = datetime.now(timezone.utc)
+    db = MagicMock()
+    db.scalar.side_effect = [
+        Message(id="msg_1", room_id=DEMO_ROOM_ID, status="translated"),
+        0,
+        DemoBotJob(kind="reply", source_id="msg_1", status="completed", attempts=0),
+        Message(id="bot_reply", status=status, translation_started_at=now if started else None,
+                translation_failed_at=now if failed else None),
+    ]
+    db.execute.return_value.all.side_effect = [
+        [("MessageCreated", "processed")],
+        [("MessageCreated", "processed"), ("TranslationRequested", event_status), ("MessageUpdated", "pending")],
+    ]
+    result = message_progress("msg_1", db, "user_1")
+    assert result.bot_reply is not None
+    assert result.bot_reply.stage == stage
+    assert result.bot_reply.original_publication == "published"
+    assert result.bot_reply.update_publication == "pending"
 
 
 def test_send_message_rejects_user_mismatch() -> None:

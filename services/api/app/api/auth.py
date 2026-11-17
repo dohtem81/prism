@@ -1,4 +1,6 @@
 from typing import Annotated
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
@@ -15,12 +17,14 @@ from services.api.app.auth.dependencies import (
 )
 from services.api.app.infra.db import get_db
 from services.api.app.infra.settings import settings
-from shared.db.models import RegisteredAccount
+from shared.db.models import DemoBotJob, RegisteredAccount, Room, RoomMember, User
+from shared.demo import DEMO_ROOM_ID
 from shared.email_verification import consume_token, issue_token, send_verification_email
 from shared.logging_utils import get_logger
 from shared.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    DemoRequest,
     LogoutRequest,
     PasswordChangeRequest,
     RefreshRequest,
@@ -53,6 +57,27 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         max_age=settings.refresh_token_ttl_days * 24 * 60 * 60,
         **common,
     )
+
+
+@router.post("/demo", response_model=LoginResponse)
+def demo_login(payload: DemoRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+    if not is_allowed_origin(request.headers.get("origin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid request origin")
+    login_guard.enforce_budget(request, "demo", 10, 3600)
+    if db.get(Room, DEMO_ROOM_ID) is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Demo room unavailable")
+
+    user_id = uuid4().hex
+    now = datetime.now(timezone.utc)
+    db.add(User(id=user_id, display_name=payload.display_name, preferred_lang=payload.preferred_lang, is_demo=True, created_at=now))
+    db.flush()
+    db.add(RoomMember(room_id=DEMO_ROOM_ID, user_id=user_id, role="member", preferred_lang=payload.preferred_lang, created_at=now))
+    db.add(DemoBotJob(kind="greeting", source_id=user_id, status="pending", attempts=0,
+                      next_attempt_at=now, created_at=now))
+    db.commit()
+    access_token, refresh_token = issue_token_pair(user_id)
+    _set_auth_cookies(response, access_token, refresh_token)
+    return LoginResponse(user_id=user_id)
 
 
 @router.post("/login", response_model=LoginResponse)

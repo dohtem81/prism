@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from services.api.app.api.admin import router as admin_router
 from services.api.app.api.auth import router as auth_router
+from services.api.app.api.demo_status import router as demo_status_router
 from services.api.app.api.flags import router as flags_router
 from services.api.app.api.health import router as health_router
 from services.api.app.api.messages import router as messages_router
@@ -78,6 +79,7 @@ async def access_logging_middleware(request: Request, call_next):
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(demo_status_router)
 app.include_router(messages_router)
 app.include_router(rooms_router)
 app.include_router(users_router)

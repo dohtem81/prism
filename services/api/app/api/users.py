@@ -1,12 +1,15 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+import re
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from services.api.app.auth.dependencies import get_current_user_id
 from services.api.app.infra.db import get_db
-from shared.db.models import User
+from shared.db.models import RoomMember, User
+from shared.demo import DEMO_ROOM_ID
 from shared.schemas.users import CreateUserRequest, CreateUserResponse
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
@@ -30,10 +33,21 @@ def create_user(
         db.commit()
         db.refresh(user)
     else:
+        if user.is_demo:
+            if payload.display_name is not None and not payload.display_name.strip():
+                raise HTTPException(status_code=422, detail="Display name cannot be blank")
+            if payload.preferred_lang is not None and not re.fullmatch(r"[a-z]{2}", payload.preferred_lang):
+                raise HTTPException(status_code=422, detail="Language must be a two-letter lowercase code")
         if payload.display_name is not None:
-            user.display_name = payload.display_name
+            user.display_name = payload.display_name.strip() if user.is_demo else payload.display_name
         if payload.preferred_lang is not None:
             user.preferred_lang = payload.preferred_lang
+            if user.is_demo:
+                membership = db.scalar(
+                    select(RoomMember).where(RoomMember.room_id == DEMO_ROOM_ID, RoomMember.user_id == current_user_id)
+                )
+                if membership is not None:
+                    membership.preferred_lang = payload.preferred_lang
         db.commit()
         db.refresh(user)
 

@@ -1,4 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class DemoRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=255)
+    preferred_lang: str = Field(default="en", pattern=r"^[a-z]{2}$")
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def strip_display_name(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class LoginRequest(BaseModel):

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,3 +22,16 @@ class SendMessageResponse(BaseModel):
     version: int
     translation_job_enqueued: bool
     created_at: datetime
+
+
+class MessageProcessingProgress(BaseModel):
+    stage: Literal["dispatch_pending", "queued", "worker_started", "completed", "partial", "failed", "unknown"]
+    original_publication: Literal["pending", "published", "unknown"]
+    update_publication: Literal["not_ready", "pending", "published", "unknown"]
+
+
+class MessageProgressResponse(MessageProcessingProgress):
+    message_id: str
+    other_readers: int = Field(ge=0)
+    bot_status: Literal["not_applicable", "queued", "processing", "retrying", "completed", "unknown"] = "not_applicable"
+    bot_reply: MessageProcessingProgress | None = None

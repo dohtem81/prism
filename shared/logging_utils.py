@@ -23,6 +23,9 @@ def configure_logging() -> None:
     root_logger = logging.getLogger()
     if not any(isinstance(handler, CorrelationIdFilter) for handler in root_logger.filters):
         root_logger.addFilter(CorrelationIdFilter())
+    for handler in root_logger.handlers:
+        if not any(isinstance(item, CorrelationIdFilter) for item in handler.filters):
+            handler.addFilter(CorrelationIdFilter())
 
 
 def set_correlation_id(correlation_id: str | None) -> contextvars.Token[str | None]:

@@ -81,6 +81,24 @@
         border-radius: 14px;
         padding: 18px;
       }
+      .progress-panel { margin-bottom: 18px; }
+      .progress-panel h3 { margin: 0 0 6px; font-size: 1rem; }
+      .progress-detail { color: var(--muted); font-size: 0.85rem; margin: 0 0 14px; }
+      .progress-lanes { display: grid; gap: 10px; }
+      .progress-lane { display: grid; grid-template-columns: 100px repeat(3, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
+      .progress-lane-label { color: var(--muted); font-size: 0.8rem; align-self: center; }
+      .progress-step { height: 112px; box-sizing: border-box; display: flex; flex-direction: column; padding: 10px; border: 1px solid #475569; border-radius: 9px; color: var(--muted); font-size: 0.82rem; }
+      .progress-step strong { display: block; margin-bottom: 4px; color: inherit; }
+      .progress-step > span { flex: 1; min-height: 0; overflow-y: auto; overflow-wrap: anywhere; }
+      .progress-step time { display: block; height: 1em; flex: none; margin-top: 5px; font-size: 0.7rem; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.8; }
+      .progress-step.done { border-color: var(--success); color: #86efac; }
+      .progress-step.active { border-color: var(--accent); color: #bfdbfe; background: rgba(96,165,250,0.12); }
+      .progress-step.failed { border-color: var(--danger); color: #fca5a5; }
+      .progress-step.warning { border-color: var(--warning); color: #fcd34d; }
+      .progress-readers { margin: 10px 0 0; color: var(--muted); font-size: 0.8rem; }
+      @media (max-width: 700px) {
+        .progress-lane { grid-template-columns: 1fr; }
+      }
       .composer {
         position: sticky;
         bottom: 0;
@@ -485,8 +503,8 @@
             <span></span><span></span><span></span>
           </button>
           <div class="menu-panel" id="menuPanel" hidden>
-            <button type="button" id="menuCreate">Create room</button>
-            <button type="button" id="menuJoin">Join room</button>
+            <button type="button" id="menuCreate" {% if is_demo %}hidden{% endif %}>Create room</button>
+            <button type="button" id="menuJoin" {% if is_demo %}hidden{% endif %}>Join room</button>
             <button type="button" id="menuSettings">Settings</button>
           </div>
         </div>
@@ -522,10 +540,10 @@
         <dialog class="popup" id="settingsDialog">
           <h3>Settings</h3>
           <form id="settingsForm" class="sidebar-form">
-            <input id="settingsDisplayName" type="text" placeholder="Display name" maxlength="255" />
-            <input id="settingsPreferredLang" type="text" placeholder="Default language (e.g. en)" required minlength="2" maxlength="8" />
+            <input id="settingsDisplayName" type="text" placeholder="Display name" maxlength="255" {% if is_demo %}required value="{{ display_name or '' }}"{% endif %} />
+            <input id="settingsPreferredLang" type="text" placeholder="Default language (e.g. en)" required minlength="2" maxlength="{% if is_demo %}2{% else %}8{% endif %}" {% if is_demo %}pattern="[a-z]{2}" value="{{ user_preferred_lang or 'en' }}"{% endif %} />
             <div id="settingsNote" class="form-note"></div>
-            <div class="form-note">Your user ID (share so a room owner can add you): <code id="ownUserId"></code></div>
+            <div class="form-note" {% if is_demo %}hidden{% endif %}>Your user ID (share so a room owner can add you): <code id="ownUserId"></code></div>
             <div class="dialog-actions">
               <button type="button" class="cancel-button">Cancel</button>
               <button type="submit" class="apply-button" disabled>Apply</button>
@@ -557,6 +575,40 @@
           </div>
         </div>
         <div id="logoutNote" class="form-note" role="status" aria-live="polite"></div>
+
+        {% if is_demo and room_id is defined and room_id %}
+        <section class="panel progress-panel" aria-labelledby="progressTitle">
+          {% include "ollama_status.html" %}
+          <h3 id="progressTitle">Your latest message</h3>
+          <p class="progress-detail" id="progressDetail" role="status" aria-live="polite">Send a message to see its journey.</p>
+          <div class="progress-lanes" aria-label="Message processing paths">
+            <div class="progress-lane">
+              <span class="progress-lane-label">Message</span>
+              <div class="progress-step" id="progressSend"><strong>1. You → Prism</strong><span>Waiting to send</span><time></time></div>
+              <div class="progress-step" id="progressOriginal"><strong>2. Prism → room</strong><span>Original message</span><time></time></div>
+            </div>
+            <div class="progress-lane">
+              <span class="progress-lane-label">Translation</span>
+              <div class="progress-step" id="progressQueue"><strong>Queue</strong><span>Waiting for message</span><time></time></div>
+              <div class="progress-step" id="progressWorker"><strong>Worker → translations</strong><span>Waiting for job</span><time></time></div>
+              <div class="progress-step" id="progressUpdate"><strong>Prism → room</strong><span>Translation update</span><time></time></div>
+            </div>
+            <div class="progress-lane">
+              <span class="progress-lane-label">Prism Bot</span>
+              <div class="progress-step" id="progressBot"><strong>Ollama → bot reply</strong><span>Waiting for message</span><time></time></div>
+              <div class="progress-step" id="progressBotOriginal"><strong>Bot → room</strong><span>Waiting for bot reply</span><time></time></div>
+            </div>
+            <div class="progress-lane">
+              <span class="progress-lane-label">Bot translation</span>
+              <div class="progress-step" id="progressBotQueue"><strong>Queue</strong><span>Waiting for bot reply</span><time></time></div>
+              <div class="progress-step" id="progressBotWorker"><strong>Worker → translations</strong><span>Waiting for job</span><time></time></div>
+              <div class="progress-step" id="progressBotUpdate"><strong>Prism → room</strong><span>Translation update</span><time></time></div>
+            </div>
+          </div>
+          <p class="progress-readers" id="progressReaders">The original and translation paths run independently after saving.</p>
+          <p class="progress-readers">Times show when this browser observed each status, in local time; they reset on refresh.</p>
+        </section>
+        {% endif %}
 
         <section class="panel stats-panel" id="statsPanel" style="display: none;">
           <h3>Room stats (owner view)</h3>
@@ -591,6 +643,7 @@
 
     <script>
       const activeUserId = {{ user_id|tojson }};
+      const isDemo = {{ (is_demo if is_demo is defined else false)|tojson }};
       const accessTokenTtlSeconds = {{ access_token_ttl_seconds|tojson }};
       const roomId = {{ (room_id if room_id is defined and room_id else none)|tojson }};
       const roomName = {{ (room_name if room_name is defined and room_name else "Dashboard")|tojson }};
@@ -619,7 +672,7 @@
               credentials: 'same-origin',
             });
             if (!response.ok) {
-              window.location.href = '/ui/login';
+              window.location.href = isDemo ? '/ui/demo' : '/ui/login';
               return;
             }
             scheduleSessionRefresh();
@@ -680,7 +733,7 @@
             state.socket.onclose = null;
             state.socket.close();
           }
-          window.location.replace('/ui/login');
+          window.location.replace(isDemo ? '/ui/demo' : '/ui/login');
         } catch (error) {
           logoutNote.textContent = error.message || 'Could not log out. Please try again.';
           logoutButton.disabled = false;
@@ -997,6 +1050,151 @@
         };
       }
 
+      const progressKey = `prism:demo-progress:${activeUserId}:${roomId}`;
+      let progressGeneration = 0;
+      let progressTimer = null;
+      let sendSequence = 0;
+      const progressStages = {
+        sending: 'Sending your message to Prism.',
+        dispatch_pending: 'Message saved; dispatching the original and translation job independently.',
+        queued: 'Message saved; translation job sent to the queue.',
+        worker_started: 'A worker picked up the translation job.',
+        completed: 'Translation processing complete.',
+        partial: 'Processing finished with some translations unavailable.',
+        failed: 'Translation failed or is unavailable.',
+        unknown: 'Message saved, but its translation stage is unavailable.',
+        send_failed: 'Could not confirm the message was sent. Check the chat before retrying.',
+      };
+
+      function setProgressCard(id, state, text) {
+        const element = document.getElementById(id);
+        if (element.dataset.progressState !== state || element.dataset.progressText !== text) {
+          const now = new Date();
+          const time = element.querySelector('time');
+          const clock = [now.getHours(), now.getMinutes(), now.getSeconds()]
+            .map(part => String(part).padStart(2, '0')).join(':');
+          time.dateTime = now.toISOString();
+          time.textContent = `Updated ${clock}`;
+          time.title = `Status observed ${now.toLocaleString()}`;
+          element.dataset.progressState = state;
+          element.dataset.progressText = text;
+        }
+        element.classList.remove('done', 'active', 'failed', 'warning');
+        if (state) element.classList.add(state);
+        element.querySelector('span').textContent = text;
+      }
+
+      const progressPublications = {
+        pending: ['active', 'Pending publication or retry'],
+        published: ['done', 'Published to room channel'],
+        unknown: ['warning', 'Publication status unavailable'],
+      };
+
+      function showTranslationProgress(prefix, progress) {
+        const stage = progress.stage;
+        const queue = {
+          dispatch_pending: ['active', 'Waiting to dispatch'],
+          queued: ['active', 'Queued for a worker'],
+          worker_started: ['done', 'Worker received job'],
+          completed: ['done', 'Job processed'],
+          partial: ['done', 'Job processed'],
+          failed: ['done', 'Job processed'],
+          unknown: ['warning', 'Queue status unavailable'],
+        }[stage] || ['warning', 'Queue status unavailable'];
+        const worker = {
+          dispatch_pending: ['', 'Waiting for job'],
+          queued: ['', 'Waiting for worker'],
+          worker_started: ['active', 'Job picked up; awaiting result'],
+          completed: ['done', 'Processing complete'],
+          partial: ['warning', 'Some translations unavailable'],
+          failed: ['failed', 'Translation failed or unavailable'],
+          unknown: ['warning', 'Worker status unavailable'],
+        }[stage] || ['warning', 'Worker status unavailable'];
+        const update = progress.update_publication === 'not_ready'
+          ? ['', stage === 'failed' ? 'No update published yet' : 'Waiting for result']
+          : (progressPublications[progress.update_publication] || progressPublications.unknown);
+        setProgressCard(`${prefix}Queue`, queue[0], queue[1]);
+        setProgressCard(`${prefix}Worker`, worker[0], worker[1]);
+        setProgressCard(`${prefix}Update`, update[0], update[1]);
+      }
+
+      function showProgress(stage, progress = null) {
+        document.getElementById('progressDetail').textContent = progressStages[stage];
+        const saved = progress !== null;
+        setProgressCard('progressSend', saved ? 'done' : stage === 'send_failed' ? 'failed' : 'active',
+          saved ? 'Saved in the database' : stage === 'send_failed' ? 'Send not confirmed' : 'Sending…');
+        if (!saved) {
+          setProgressCard('progressOriginal', '', 'Waiting for message');
+          setProgressCard('progressQueue', '', 'Waiting for message');
+          setProgressCard('progressWorker', '', 'Waiting for job');
+          setProgressCard('progressUpdate', '', 'Waiting for result');
+          setProgressCard('progressBot', '', 'Waiting for message');
+          setProgressCard('progressBotOriginal', '', 'Waiting for bot reply');
+          setProgressCard('progressBotQueue', '', 'Waiting for bot reply');
+          setProgressCard('progressBotWorker', '', 'Waiting for job');
+          setProgressCard('progressBotUpdate', '', 'Waiting for result');
+          document.getElementById('progressReaders').textContent = 'The original and translation paths run independently after saving.';
+          return;
+        }
+        const original = progressPublications[progress.original_publication] || progressPublications.unknown;
+        setProgressCard('progressOriginal', original[0], original[1]);
+        showTranslationProgress('progress', progress);
+        const bot = {
+          not_applicable: ['', 'No bot reply requested'],
+          queued: ['active', 'Queued for Prism Bot'],
+          processing: ['active', 'Ollama is processing your message; CPU replies may take longer'],
+          retrying: ['warning', 'Bot reply delayed; retrying'],
+          completed: ['done', 'Bot reply saved'],
+          unknown: ['warning', 'Bot status unavailable'],
+        }[progress.bot_status] || ['warning', 'Bot status unavailable'];
+        setProgressCard('progressBot', bot[0], bot[1]);
+        if (progress.bot_reply) {
+          const botOriginal = progressPublications[progress.bot_reply.original_publication] || progressPublications.unknown;
+          setProgressCard('progressBotOriginal', botOriginal[0], botOriginal[1]);
+          showTranslationProgress('progressBot', progress.bot_reply);
+        } else {
+          const status = progress.bot_status === 'completed'
+            ? ['warning', 'Bot reply status unavailable']
+            : progress.bot_status === 'not_applicable'
+              ? ['', 'No bot reply requested']
+              : ['', 'Waiting for bot reply'];
+          for (const id of ['progressBotOriginal', 'progressBotQueue', 'progressBotWorker', 'progressBotUpdate']) {
+            setProgressCard(id, status[0], status[1]);
+          }
+        }
+        const count = progress.other_readers;
+        document.getElementById('progressReaders').textContent =
+          `${count} other participant${count === 1 ? '' : 's'} marked this message seen. ` +
+          'Publishing does not confirm display; offline participants can load saved messages later.';
+      }
+
+      async function pollProgress(messageId, generation) {
+        if (generation !== progressGeneration) return;
+        let progress;
+        try {
+          const response = await apiFetch(`/v1/messages/${encodeURIComponent(messageId)}/progress`);
+          if (!response.ok) throw new Error(`Progress unavailable (${response.status})`);
+          progress = await response.json();
+          if (generation !== progressGeneration) return;
+          if (!Object.hasOwn(progressStages, progress.stage)) throw new Error('Unrecognized progress state');
+          showProgress(progress.stage, progress);
+        } catch (error) {
+          if (generation !== progressGeneration) return;
+          console.error('Failed to load message progress', error);
+          document.getElementById('progressDetail').textContent = 'Progress updates unavailable. Retrying…';
+        }
+        const botTerminal = progress?.bot_status === 'not_applicable' ||
+          (progress?.bot_status === 'completed' && progress?.bot_reply &&
+            ['completed', 'partial', 'failed'].includes(progress.bot_reply.stage));
+        const terminal = ['completed', 'partial', 'failed'].includes(progress?.stage) && botTerminal;
+        progressTimer = setTimeout(() => pollProgress(messageId, generation), terminal ? 10000 : 2000);
+      }
+
+      if (isDemo && roomId) {
+        const previousMessage = sessionStorage.getItem(progressKey);
+        if (previousMessage) pollProgress(previousMessage, progressGeneration);
+      }
+
       async function sendMessage() {
         if (!roomId) return;
         const content = messageInput.value.trim();
@@ -1011,11 +1209,22 @@
         const payload = {
           author_user_id: activeUserId,
           room_id: roomId,
-          client_message_id: `ui-${Date.now()}`,
+          client_message_id: `ui-${Date.now()}-${++sendSequence}`,
           source_lang: sourceLang,
           content_original: content,
         };
 
+        let generation;
+        if (isDemo) {
+          generation = ++progressGeneration;
+          clearTimeout(progressTimer);
+          sessionStorage.removeItem(progressKey);
+          document.querySelectorAll('.progress-step').forEach(element => {
+            delete element.dataset.progressState;
+            delete element.dataset.progressText;
+          });
+          showProgress('sending');
+        }
         try {
           const response = await apiFetch('/v1/messages', {
             method: 'POST',
@@ -1026,10 +1235,16 @@
             const body = await response.json().catch(() => ({}));
             throw new Error(body.detail || `Send failed (${response.status})`);
           }
-          messageInput.value = '';
+          const result = await response.json();
+          if (isDemo && generation === progressGeneration) {
+            sessionStorage.setItem(progressKey, result.message_id);
+            pollProgress(result.message_id, generation);
+          }
+          if (messageInput.value.trim() === content) messageInput.value = '';
         } catch (error) {
           console.error('Failed to send message', error);
           sendNote.textContent = error.message || 'Failed to send message';
+          if (isDemo && generation === progressGeneration) showProgress('send_failed');
         }
       }
 
@@ -1130,6 +1345,7 @@
           if (!response.ok) throw new Error(body.detail || 'Failed to save settings');
 
           settingsDialog.close();
+          if (isDemo) window.location.reload();
         } catch (error) {
           settingsNote.textContent = error.message;
         }

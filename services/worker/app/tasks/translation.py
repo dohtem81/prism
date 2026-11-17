@@ -9,7 +9,8 @@ from uuid import uuid4
 
 from openai import OpenAI
 import redis
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 
@@ -212,8 +213,11 @@ def _send_to_dead_letter(
 
 def run_translation_task(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
     try:
+        _record_translation_progress(message_id, room_id, failed=False)
         return _run_translation_task(message_id, room_id, source_lang, content_original)
     except Exception as exc:
+        logger.exception("translation_task_failed", extra={"message_id": message_id, "room_id": room_id})
+        _record_translation_progress(message_id, room_id, failed=True)
         _send_to_dead_letter(message_id, room_id, source_lang, content_original, exc)
         return {
             "message_id": message_id,
@@ -222,6 +226,24 @@ def run_translation_task(message_id: str, room_id: str, source_lang: str, conten
             "error_type": type(exc).__name__,
             "error_message": str(exc),
         }
+
+
+def _record_translation_progress(message_id: str, room_id: str, *, failed: bool) -> None:
+    values = (
+        {"translation_failed_at": datetime.now(timezone.utc)}
+        if failed
+        else {"translation_started_at": datetime.now(timezone.utc), "translation_failed_at": None}
+    )
+    try:
+        with SessionLocal() as db:
+            db.execute(
+                update(Message)
+                .where(Message.id == message_id, Message.room_id == room_id, Message.status == "original_only")
+                .values(**values)
+            )
+            db.commit()
+    except SQLAlchemyError:
+        logger.exception("translation_progress_recording_failed", extra={"message_id": message_id, "room_id": room_id})
 
 
 def _run_translation_task(message_id: str, room_id: str, source_lang: str, content_original: str) -> dict[str, str]:
@@ -242,7 +264,7 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
         failure_count = 0
         started_at = datetime.now(timezone.utc)
         room_model = _model_for_quality_mode(room.default_translation_mode)
-        active_provider_name, _ = _resolve_provider_and_model(model_name=room_model)
+        active_provider_name = _resolve_provider_and_model(model_name=room_model)[0]
 
         for target_lang in target_langs:
             existing = db.scalar(
@@ -327,14 +349,14 @@ def _run_translation_task(message_id: str, room_id: str, source_lang: str, conte
                     message_id=message_id,
                     target_lang=target_lang,
                     content=translated_text,
-                    provider="openai",
+                    provider=active_provider_name,
                     quality_mode=room.default_translation_mode,
                     translated_at=datetime.now(timezone.utc),
                 )
                 db.add(translation)
                 translations_patch[target_lang] = {
                     "content": translated_text,
-                    "provider": "openai",
+                    "provider": active_provider_name,
                     "quality_mode": room.default_translation_mode,
                     "translated_at": datetime.now(timezone.utc).isoformat(),
                 }

@@ -93,6 +93,9 @@ def test_cookie_auth_rejects_cross_origin_mutation() -> None:
 
 def test_dashboard_renders_server_authenticated_identity() -> None:
     app.dependency_overrides[get_current_user_id] = lambda: "user_1"
+    db = MagicMock()
+    db.get.return_value = None
+    app.dependency_overrides[get_db] = lambda: db
 
     try:
         response = TestClient(app).get("/ui")
